@@ -32,8 +32,7 @@ void Gossip::timerFiredCallback(int type){
 
   case START_GOSSIP: {
     int dest = getPeer();
-    if ( dest != -1 && ( wait == 2 || !isBusy ) ) {
-      
+    if ( dest != -1 ) {
       GossipInfo send;
       stringstream out;
       string neighbour;
@@ -48,8 +47,8 @@ void Gossip::timerFiredCallback(int type){
       send.signal = GOSSIP_PULL;
       toNetworkLayer( createGossipDataPacket( GOSSIP, send , expectedSeq ),   neighbour.c_str());
       wait = 0;
-    } else
-      wait++;
+    }// else
+    //wait++;
     setTimer(START_GOSSIP, gossipInterval);
     break;
   }
@@ -94,12 +93,12 @@ void Gossip::fromNetworkLayer(ApplicationPacket * genericPacket, const char *sou
     break;
 
   case GOSSIP:
-    if(isBusy){
+    /*if(isBusy){
       //Send BUSY signal.
       extraData.signal = GOSSIP_BUSY;
       trace() << self << " is busy.";
       toNetworkLayer(createGossipDataPacket(GOSSIP, extraData , packetsSent++), source);
-    } else {
+      } else {*/
 
       switch (receivedData.signal) {
      
@@ -141,7 +140,7 @@ void Gossip::fromNetworkLayer(ApplicationPacket * genericPacket, const char *sou
 	}
 	break;
       }
-    }
+      //    }
     break;
 
   default:
