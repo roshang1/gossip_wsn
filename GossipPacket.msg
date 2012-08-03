@@ -18,9 +18,14 @@ cplusplus {{
 }}
 packet ApplicationPacket;
 
+struct GossipInfo {
+       int data;
+       short signal;
+};
+
 //
 // TODO generated message class
 //
 packet GossipPacket extends ApplicationPacket {
-    int extraData;
+    GossipInfo extraData;
 }

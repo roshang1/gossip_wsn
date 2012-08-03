@@ -3,41 +3,57 @@
 Define_Module(Gossip);
 
 void Gossip::startup(){
-	int nodeStartupDiff = ( (int)par("nodeStartupDiff") ) * self;
-	stringstream out;
-	string temp;
-	packetsSent = 0;
-	gossipMsg = 0;
-	neighbourCheckInterval = STR_SIMTIME(par("neighbourCheckInterval"));
-	gossipInterval = STR_SIMTIME(par("gossipInterval"));
+  int nodeStartupDiff = ( (int)par("nodeStartupDiff") ) * self;
+  stringstream out;
+  string temp, temp2;
+  wait = expectedSeq = currentPeerIndex = packetsSent = 0;
+  neighbourCheckInterval = STR_SIMTIME(par("neighbourCheckInterval"));
+  gossipInterval = STR_SIMTIME(par("gossipInterval"));
+  gossipMsg = (self % 2 == 0) ? 10 : 20;
+  isBusy = false;
 
-	out << nodeStartupDiff;
-	temp = out.str();
-	temp += "ms";
-	setTimer( GET_NEIGHBOUR, STR_SIMTIME( temp.c_str() ) );
+  out << nodeStartupDiff; temp = out.str(); temp += "ms";
+  setTimer( GET_NEIGHBOUR, STR_SIMTIME( temp.c_str() ) );
 
-	setTimer( START_GOSSIP, STR_SIMTIME( temp.c_str() ) );
-	if(self == 0){
-		gossipMsg = GOSSIP;
-	}
+  out.str(string());
+  nodeStartupDiff += 200; out << nodeStartupDiff; temp2 = out.str(); temp2 += "ms";
+  setTimer( START_GOSSIP, STR_SIMTIME( temp2.c_str() ) );
 }
 
 void Gossip::timerFiredCallback(int type){
-	switch (type){
+  switch (type){
 
-		case GET_NEIGHBOUR: {
-			//trace() << "Request neighbours." ;
-			toNetworkLayer(createGossipDataPacket(PULL_NEIGHBOUR, 0, packetsSent++), BROADCAST_NETWORK_ADDRESS);
-			setTimer(GET_NEIGHBOUR, neighbourCheckInterval);
-			break;
-		}
+  case GET_NEIGHBOUR: {
+    //    trace() << "Request neighbours.";
+    toNetworkLayer(createGossipDataPacket(PULL_NEIGHBOUR, packetsSent++), BROADCAST_NETWORK_ADDRESS);
+    setTimer(GET_NEIGHBOUR, neighbourCheckInterval);
+    break;
+  }
 
-		case START_GOSSIP: {
-			trace() << "Start gossip.";
-			doGossip();
-			setTimer(START_GOSSIP, gossipInterval);
-		}
-	}
+  case START_GOSSIP: {
+    int dest = getPeer();
+    if ( dest != -1 && ( wait == 2 || !isBusy ) ) {
+      
+      GossipInfo send;
+      stringstream out;
+      string neighbour;
+
+      expectedSeq = packetsSent++;
+      isBusy = true;
+      
+      out << dest;
+      neighbour = out.str();
+      trace() << "Send " << gossipMsg << " to " << dest;
+      send.data = gossipMsg;
+      send.signal = GOSSIP_PULL;
+      toNetworkLayer( createGossipDataPacket( GOSSIP, send , expectedSeq ),   neighbour.c_str());
+      wait = 0;
+    } else
+      wait++;
+    setTimer(START_GOSSIP, gossipInterval);
+    break;
+  }
+  }
 }
 
 void Gossip::handleSensorReading(SensorReadingMessage * reading){
@@ -49,73 +65,134 @@ void Gossip::handleNeworkControlMessage(cMessage * msg){
 }
 
 void Gossip::fromNetworkLayer(ApplicationPacket * genericPacket, const char *source, double rssi, double lqi){
-	GossipPacket *rcvPacket = check_and_cast<GossipPacket*>(genericPacket);
-	double msgType = rcvPacket->getData();
-	int peer = atoi(source), i;
-	bool found = false;
+  GossipPacket *rcvPacket = check_and_cast<GossipPacket*>(genericPacket);
+  double msgType = rcvPacket->getData();
+  int seq = rcvPacket->getSequenceNumber();
+  GossipInfo receivedData = rcvPacket->getExtraData();
+  GossipInfo extraData;
+  int peer = atoi(source), i;
+  bool found = false;
 
-	switch((int)msgType){
+  switch((int)msgType){
 
-	case PULL_NEIGHBOUR:
-		//PUSH selfIP: Temporarily receiver will figure out this from the source IP, add sourceIP to packet later.
-		toNetworkLayer(createGossipDataPacket(PUSH_NEIGHBOUR, 0 , packetsSent++), source);
-		break;
+  case PULL_NEIGHBOUR:
+    //PUSH selfIP: Temporarily receiver will figure out this from the source IP, add sourceIP to packet later.
+    toNetworkLayer(createGossipDataPacket(PUSH_NEIGHBOUR , packetsSent++), source);
+    break;
 
-	case PUSH_NEIGHBOUR:
-		//PULL response received, update neighbour list
-		//trace() << "Neighbour " << peer << "reported back.";
-		found = false;
-		for(i = 0; i < peers.size(); i++)
-			if(peer == peers[i]){
-				found = true; break;
-			}
+  case PUSH_NEIGHBOUR:
+    //PULL response received, update neighbour list if new peer is discovered.
+    //    trace() << "Neighbour " << peer << "reported back.";
+    found = false;
+    for(i = 0; i < peers.size(); i++)
+      if(peer == peers[i]){
+	found = true; break;
+      }
 
-		if(!found)
-			peers.push_back(peer);
-		break;
+    if(!found)
+      peers.push_back(peer);
+    break;
 
-	case GOSSIP:
-		if( rcvPacket->getExtraData() > gossipMsg ) {
-			trace() << self << " infected.";
-			gossipMsg = rcvPacket->getExtraData();
-		}else {
-			trace() << "Ignoring gossip msg.";
-		}
-		break;
+  case GOSSIP:
+    if(isBusy){
+      //Send BUSY signal.
+      extraData.signal = GOSSIP_BUSY;
+      trace() << self << " is busy.";
+      toNetworkLayer(createGossipDataPacket(GOSSIP, extraData , packetsSent++), source);
+    } else {
 
-	default:
-		trace() << "Incorrect packet received.";
-		break;
+      switch (receivedData.signal) {
+     
+      case GOSSIP_PULL:
+	//Calculate avg, and share.
+	isBusy = true;
+	expectedSeq = seq;
+	extraData.data = ( gossipMsg + receivedData.data ) / 2;
+	extraData.signal = GOSSIP_PUSH;
 
+	toNetworkLayer(createGossipDataPacket(GOSSIP, extraData , packetsSent++), source);
+	trace() << "New avg " << extraData.data << " is being sent to " << source;
+	break;
+      
+      case GOSSIP_PUSH:
+	if(seq == expectedSeq) {
+	  //Update avg, send ACK
+	  extraData.data = gossipMsg = receivedData.data;
+	  extraData.signal = GOSSIP_ACK;
+
+	  toNetworkLayer(createGossipDataPacket(GOSSIP, extraData , packetsSent++), source);
+	  isBusy = false;
+	  trace() << "Update avg to " << extraData.data << ", send ACK to " << source;
 	}
+	break;
+      
+      case GOSSIP_BUSY:
+	//Peer was busy, this node shall try on next trigger.
+	isBusy = false;
+	trace() << "Peer " << source << " was busy";
+	break;
+      
+      case GOSSIP_ACK:
+	if(seq == expectedSeq) {
+	  //ACK recieved, update avg.
+	  gossipMsg = receivedData.data;
+	  isBusy = false;
+	  trace() << "ACK received, new avg = " << gossipMsg;
+	}
+	break;
+      }
+    }
+    break;
+
+  default:
+    trace() << "Incorrect packet received.";
+    break;
+  }
 }
 
-void Gossip::doGossip(){
-	int i;
-	stringstream out;
-	string neighbour;
+/*void Gossip::doGossip(){
+  int i;
+  stringstream out;
+  string neighbour;
 
-	for(i = 0; i < 4 && i < peers.size(); i++) {
-		out.str(string());
-		out << peers[i]; neighbour = out.str();
-		//trace() << "Pushing to " << neighbour ;
-		toNetworkLayer( createGossipDataPacket( GOSSIP, gossipMsg , packetsSent++ ), neighbour.c_str() );
-	}
+  for(i = 0; i < 4 && i < peers.size(); i++) {
+    out.str(string());
+    out << peers[i]; neighbour = out.str();
+    //trace() << "Pushing to " << neighbour ;
+    toNetworkLayer( createGossipDataPacket( GOSSIP, gossipMsg , packetsSent++ ), neighbour.c_str() );
+  }
+  }*/
+
+//Make this more intelligent:
+// 1. Add randomization
+// 2. Discard old peers
+int Gossip::getPeer() {
+  if (peers.size() > 0) {
+    currentPeerIndex = (currentPeerIndex + 1) % peers.size();
+    return peers[currentPeerIndex];
+  }
+  return -1;
 }
 
-GossipPacket* Gossip::createGossipDataPacket(double data, int extra, unsigned int seqNum)
+GossipPacket* Gossip::createGossipDataPacket(double data, unsigned int seqNum)
 {
-	GossipPacket *newPacket = new GossipPacket("Gossip Msg", APPLICATION_PACKET);
-	newPacket->setData(data);
-	newPacket->setExtraData (extra);
-	newPacket->setSequenceNumber(seqNum);
-	return newPacket;
+  GossipPacket *newPacket = new GossipPacket("Gossip Msg", APPLICATION_PACKET);
+  newPacket->setData(data);
+  newPacket->setSequenceNumber(seqNum);
+  return newPacket;
+}
+
+GossipPacket* Gossip::createGossipDataPacket(double data, GossipInfo extra, unsigned int seqNum)
+{
+  GossipPacket *newPacket = createGossipDataPacket(data, seqNum);
+  newPacket->setExtraData (extra);
+  return newPacket;
 }
 
 void Gossip::finishSpecific(){
-	int i;
-	trace() << "Gossip msg " << gossipMsg;
-	for(i = 0; i < peers.size(); i++) {
-		trace() << "Peer No." << peers[i];
-	}
+  int i;
+  trace() << "Gossip msg " << gossipMsg;
+  for(i = 0; i < peers.size(); i++) {
+    trace() << "Peer No." << peers[i];
+  }
 }

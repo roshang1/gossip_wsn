@@ -22,7 +22,7 @@ simple Gossip like node.application.iApplication {
         bool isSink = default(false);
 		int packetHeaderOverhead = default (8);
 		int priority = default (1);
-		int constantDataPayload = default (2);
+		int constantDataPayload = default (14);
         
         string neighbourCheckInterval = default("5000ms"); 
         string gossipInterval = default("500ms");
