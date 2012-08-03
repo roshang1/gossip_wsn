@@ -24,7 +24,11 @@ simple Gossip like node.application.iApplication {
 		int priority = default (1);
 		int constantDataPayload = default (2);
         
-        int neighbourCheckInterval = default(5); 
+        string neighbourCheckInterval = default("5000ms"); 
+        string gossipInterval = default("500ms");
+        // After every "nodeStartupDiff" time, a node starts looking up its neighbours.
+        int nodeStartupDiff = default(100); // in ms, code converts int to simtime_t
+        int gossipMsg = default(10);
     gates:
         output toCommunicationModule;
         input fromCommunicationModule;

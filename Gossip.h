@@ -4,6 +4,7 @@
 
 #include "VirtualApplication.h"
 #include <vector>
+#include "GossipPacket_m.h"
 
 using namespace std;
 
@@ -21,8 +22,7 @@ enum GOSSIP_TIMERS {
 class Gossip: public VirtualApplication {
 	private:
 		int packetsSent;
-		int neighbourCount;
-		int neighbourCheckInterval;
+		simtime_t neighbourCheckInterval, gossipInterval;
 		vector<int> peers;
 		int gossipMsg;
 	protected:
@@ -34,5 +34,6 @@ class Gossip: public VirtualApplication {
 		void fromNetworkLayer(ApplicationPacket *, const char *, double, double);
 
 		void doGossip();
+		GossipPacket* createGossipDataPacket(double , int , unsigned int );
 };
 #endif
