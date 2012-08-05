@@ -20,6 +20,7 @@ packet ApplicationPacket;
 
 struct GossipInfo {
        int data;
+       int seq;
        short signal;
 };
 

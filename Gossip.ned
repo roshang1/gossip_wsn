@@ -22,10 +22,10 @@ simple Gossip like node.application.iApplication {
         bool isSink = default(false);
 		int packetHeaderOverhead = default (8);
 		int priority = default (1);
-		int constantDataPayload = default (14);
+		int constantDataPayload = default (18);
         
-        string neighbourCheckInterval = default("5000ms"); 
-        string gossipInterval = default("500ms");
+        string neighbourCheckInterval = default("5s"); 
+        string gossipInterval = default("1s");
         // After every "nodeStartupDiff" time, a node starts looking up its neighbours.
         int nodeStartupDiff = default(100); // in ms, code converts int to simtime_t
         int gossipMsg = default(10);
