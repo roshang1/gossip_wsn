@@ -28,7 +28,7 @@ class Gossip: public VirtualApplication {
   int packetsSent;
   simtime_t neighbourCheckInterval, gossipInterval;
   vector<int> peers;
-  int gossipMsg;
+  double gossipMsg;
   bool isBusy;
   short currentPeerIndex;
   int expectedSeq;
