@@ -8,11 +8,11 @@ void Gossip::startup() {
 	string temp, temp2;
 	PEERINFO myInfo;
 
-	wait = expectedSeq = currentPeerIndex = packetsSent = 0;
+	rounds = wait = expectedSeq = currentPeerIndex = packetsSent = 0;
 	neighbourCheckInterval = STR_SIMTIME(par("neighbourCheckInterval"));
 	gossipInterval = STR_SIMTIME(par("gossipInterval"));
 	myInfo.id = self;
-	myInfo.neighbourCount = peers.size() + 1; //Count yourself as well
+	myInfo.neighbourCount = peers.size(); //Count yourself as well
 	peers.push_back(myInfo);
 
 	//Node 0 takes a value 1.
@@ -48,7 +48,7 @@ void Gossip::timerFiredCallback(int type) {
 		copy(newPeers.begin(), newPeers.end(), peers.begin());
 
 		myInfo.id = self;
-		myInfo.neighbourCount = peers.size() + 1; //Count yourself as well
+		myInfo.neighbourCount = peers.size();
 		for (it = peers.begin(); it != peers.end(); ++it) {
 			(*it).weight = (double) 1 / (double) (1 + ((*it).neighbourCount
 					> myInfo.neighbourCount ? (*it).neighbourCount
@@ -119,7 +119,7 @@ void Gossip::fromNetworkLayer(ApplicationPacket * genericPacket,
 	case PULL_NEIGHBOUR:
 		//PUSH selfIP: Temporarily receiver will figure out this from the source IP, add sourceIP to packet later.
 		toNetworkLayer(createGossipDataPacket(PUSH_NEIGHBOUR,
-				(int) peers.size(), packetsSent++), source);
+				(int) peers.size() - 1, packetsSent++), source);
 		break;
 
 	case PUSH_NEIGHBOUR:
@@ -158,6 +158,7 @@ void Gossip::fromNetworkLayer(ApplicationPacket * genericPacket,
 			toNetworkLayer(createGossipDataPacket(GOSSIP_ACK, extraData,
 					packetsSent++), source);
 			isBusy = false;
+			rounds++;
 			trace() << "Update avg to " << extraData.data << ", send ACK to "
 					<< source;
 		}
@@ -223,7 +224,7 @@ GossipPacket* Gossip::createGossipDataPacket(double data, int neighbourCount,
 
 void Gossip::finishSpecific() {
 	int i;
-	trace() << "Gossip msg " << gossipMsg;
+	trace() << "Gossip msg " << gossipMsg << " Rounds = " << rounds;
 	for (i = 0; i < peers.size(); i++) {
 		trace() << "Peer No." << peers[i].id;
 	}
