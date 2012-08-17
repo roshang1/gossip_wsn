@@ -1,4 +1,3 @@
-
 #ifndef _GOSSIP_H_
 #define _GOSSIP_H_
 
@@ -23,11 +22,19 @@ enum GOSSIP_TIMERS {
   START_GOSSIP = 2
 };
 
+struct peerInfo {
+  int id, neighbourCount;
+  double weight;
+};
+
+typedef struct peerInfo PEERINFO;
+
 class Gossip: public VirtualApplication {
  private:
   int packetsSent;
   simtime_t neighbourCheckInterval, gossipInterval;
-  vector<int> peers;
+  vector<PEERINFO> peers;
+  vector<PEERINFO> newPeers;
   double gossipMsg;
   bool isBusy;
   short currentPeerIndex;
@@ -46,5 +53,6 @@ class Gossip: public VirtualApplication {
   int getPeer();
   GossipPacket* createGossipDataPacket(double , unsigned int );
   GossipPacket* createGossipDataPacket(double , GossipInfo , unsigned int );
+  GossipPacket* createGossipDataPacket(double , int, unsigned int );
 };
 #endif

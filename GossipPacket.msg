@@ -23,9 +23,11 @@ struct GossipInfo {
        int seq;
 };
 
+
 //
 // TODO generated message class
 //
 packet GossipPacket extends ApplicationPacket {
     GossipInfo extraData;
+    int neighbourCount;
 }
