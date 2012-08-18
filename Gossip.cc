@@ -38,33 +38,42 @@ void Gossip::startup() {
 void Gossip::timerFiredCallback(int type) {
 	PEERINFO myInfo;
 	vector<PEERINFO>::iterator it;
+	vector<int> delIndices;
+	vector<PEERINFO> keepPeers;
 	double sum = 0.0;
+	int i =0;
 	switch (type) {
 
 	case GET_NEIGHBOUR: {
 		trace() << "Request neighbours.";
-		peers.clear();
-		peers.resize(newPeers.size());
-		copy(newPeers.begin(), newPeers.end(), peers.begin());
-
-		myInfo.id = self;
-		myInfo.neighbourCount = peers.size();
-		for (it = peers.begin(); it != peers.end(); ++it) {
-			(*it).weight = (double) 1 / (double) (1 + ((*it).neighbourCount
-					> myInfo.neighbourCount ? (*it).neighbourCount
-					: myInfo.neighbourCount));
-			sum += (*it).weight;
-			trace() << "Id = " << (*it).id << ", weight = " << (*it).weight
-					<< ", count = " << (*it).neighbourCount;
+		//Skip the first element which is the node itself.
+		keepPeers.push_back(peers[0]);
+		for (it = peers.begin() + 1, i = 1; it != peers.end(); ++it, i++) {
+			(*it).staleness++;
+			if((*it).staleness <= 3)
+				keepPeers.push_back((*it)); // Still good, keep it.
 		}
-		myInfo.weight = (double) 1 - sum;
-		peers.push_back(myInfo);
-		trace() << "Id = " << myInfo.id << ", weight = " << myInfo.weight
-				<< ", count = " << myInfo.neighbourCount;
+
+		peers.clear();
+		peers.resize(keepPeers.size());
+		copy(keepPeers.begin(), keepPeers.end(), peers.begin());
+
+		for (it = newPeers.begin(); it != newPeers.end(); ++it) {
+			peers.push_back((*it));
+		}
+
+		peers.at(0).neighbourCount = peers.size() - 1;
+		//Skip the first element which is the node itself.
+		for (it = peers.begin() + 1; it != peers.end(); ++it) {
+			(*it).weight = (double) 1 / (double) (1 + ((*it).neighbourCount > peers.at(0).neighbourCount ? (*it).neighbourCount : peers.at(0).neighbourCount));
+			sum += (*it).weight;
+			trace() << "Id = " << (*it).id << ", weight = " << (*it).weight	<< ", count = " << (*it).neighbourCount;
+		}
+		peers.at(0).weight = (double) 1 - sum;
+		trace() << "Id = " << peers.at(0).id << ", weight = " << peers.at(0).weight << ", count = " << peers.at(0).neighbourCount;
 
 		newPeers.clear();
-		toNetworkLayer(createGossipDataPacket(PULL_NEIGHBOUR, packetsSent++),
-				BROADCAST_NETWORK_ADDRESS);
+		toNetworkLayer(createGossipDataPacket(PULL_NEIGHBOUR, packetsSent++), BROADCAST_NETWORK_ADDRESS);
 		setTimer(GET_NEIGHBOUR, neighbourCheckInterval);
 		break;
 	}
@@ -113,6 +122,7 @@ void Gossip::fromNetworkLayer(ApplicationPacket * genericPacket,
 	GossipInfo extraData;
 	int peer = atoi(source), i;
 	PEERINFO neighbour;
+	bool found = false;
 
 	switch ((int) msgType) {
 
@@ -125,9 +135,19 @@ void Gossip::fromNetworkLayer(ApplicationPacket * genericPacket,
 	case PUSH_NEIGHBOUR:
 		//PULL response received, update neighbour list if new peer is discovered.
 		//    trace() << "Neighbour " << peer << "reported back.";
-		neighbour.id = peer;
-		neighbour.neighbourCount = rcvPacket->getNeighbourCount();
-		newPeers.push_back(neighbour);
+		for(i = 0; i < peers.size(); i++) {
+			if(peers.at(i).id == peer) {
+				found = true;
+				peers.at(i).staleness = 0;
+				peers.at(i).neighbourCount = rcvPacket->getNeighbourCount();
+			}
+		}
+		if(!found) {
+			neighbour.id = peer;
+			neighbour.staleness = 0;
+			neighbour.neighbourCount = rcvPacket->getNeighbourCount();
+			newPeers.push_back(neighbour);
+		}
 		break;
 
 	case GOSSIP_PULL:

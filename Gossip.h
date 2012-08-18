@@ -23,7 +23,7 @@ enum GOSSIP_TIMERS {
 };
 
 struct peerInfo {
-  int id, neighbourCount;
+  int id, neighbourCount, staleness;
   double weight;
 };
 
@@ -33,6 +33,7 @@ class Gossip: public VirtualApplication {
  private:
   int packetsSent;
   simtime_t neighbourCheckInterval, gossipInterval;
+  //To do: Implement using a list, it's a better option.
   vector<PEERINFO> peers;
   vector<PEERINFO> newPeers;
   double gossipMsg;
