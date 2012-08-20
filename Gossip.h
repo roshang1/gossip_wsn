@@ -20,7 +20,8 @@ enum GOSSIP_CONTROL_MSGS {
 
 enum GOSSIP_TIMERS {
   GET_NEIGHBOUR = 1,
-  START_GOSSIP = 2
+  START_GOSSIP = 2,
+  SAMPLE_AVG = 3
 };
 
 class Gossip: public VirtualApplication {

@@ -19,9 +19,14 @@ void Gossip::startup() {
   out.str(string());
   nodeStartupDiff += 200; out << nodeStartupDiff; temp2 = out.str(); temp2 += "ms";
   setTimer( START_GOSSIP, STR_SIMTIME( temp2.c_str() ) );
+
+  temp2 = "5000ms";
+  setTimer( SAMPLE_AVG, STR_SIMTIME( temp2.c_str() ) );
 }
 
+
 void Gossip::timerFiredCallback(int type) {
+	string temp2 ;
   switch (type){
 
   case GET_NEIGHBOUR: {
@@ -29,6 +34,13 @@ void Gossip::timerFiredCallback(int type) {
     toNetworkLayer(createGossipDataPacket(PULL_NEIGHBOUR, packetsSent++), BROADCAST_NETWORK_ADDRESS);
     setTimer(GET_NEIGHBOUR, neighbourCheckInterval);
     break;
+  }
+
+  case SAMPLE_AVG:{
+	 trace() << "Current Avg = " << gossipMsg;
+	 temp2 = "5000ms";
+	 setTimer(SAMPLE_AVG, STR_SIMTIME( temp2.c_str() ));
+	 break;
   }
 
   case START_GOSSIP: {
@@ -43,7 +55,7 @@ void Gossip::timerFiredCallback(int type) {
 	isBusy = true;      
 	out << dest;
 	neighbour = out.str();
-	trace() << "Send " << gossipMsg << " to " << dest;
+	//trace() << "Send " << gossipMsg << " to " << dest;
 	send.data = gossipMsg;
        	send.seq = expectedSeq = self;
 	toNetworkLayer( createGossipDataPacket( GOSSIP_PULL, send , packetsSent++),   neighbour.c_str());
@@ -95,7 +107,7 @@ void Gossip::fromNetworkLayer(ApplicationPacket * genericPacket, const char *sou
   case GOSSIP_PULL:
     if( isBusy ) {
       //Send BUSY signal.
-      trace() << self << " is busy.";
+      //trace() << self << " is busy.";
       toNetworkLayer(createGossipDataPacket(GOSSIP_BUSY, extraData , packetsSent++), source);
     } else {
       //Calculate avg, and share.
@@ -104,7 +116,7 @@ void Gossip::fromNetworkLayer(ApplicationPacket * genericPacket, const char *sou
       extraData.data = ( gossipMsg + receivedData.data ) / 2;
 	
       toNetworkLayer(createGossipDataPacket(GOSSIP_PUSH, extraData , packetsSent++), source);
-      trace() << "New avg " << extraData.data << " is being sent to " << source;
+      //trace() << "New avg " << extraData.data << " is being sent to " << source;
     }
     break;
       
@@ -116,14 +128,14 @@ void Gossip::fromNetworkLayer(ApplicationPacket * genericPacket, const char *sou
 
       toNetworkLayer(createGossipDataPacket(GOSSIP_ACK, extraData , packetsSent++), source);
       isBusy = false;
-      trace() << "Update avg to " << extraData.data << ", send ACK to " << source;
+      //trace() << "Update avg to " << extraData.data << ", send ACK to " << source;
     }
     break;
       
   case GOSSIP_BUSY:
     //Peer was busy, this node shall try on next trigger.
     isBusy = false;
-    trace() << "Peer " << source << " was busy";
+    //trace() << "Peer " << source << " was busy";
     break;
       
   case GOSSIP_ACK:
@@ -131,12 +143,12 @@ void Gossip::fromNetworkLayer(ApplicationPacket * genericPacket, const char *sou
       //ACK recieved, update avg.
       gossipMsg = receivedData.data;
       isBusy = false;
-      trace() << "ACK received, new avg = " << gossipMsg;
+      //trace() << "ACK received, new avg = " << gossipMsg;
     }
     break;
 
   default:
-    trace() << "Incorrect packet received.";
+    //trace() << "Incorrect packet received.";
     break;
   }
 }
@@ -170,7 +182,7 @@ GossipPacket* Gossip::createGossipDataPacket(double data, GossipInfo extra, unsi
 
 void Gossip::finishSpecific(){
   int i;
-  trace() << "Gossip msg " << gossipMsg;
+  trace() << "Final Avg = " << gossipMsg;
   for(i = 0; i < peers.size(); i++) {
     trace() << "Peer No." << peers[i];
   }
