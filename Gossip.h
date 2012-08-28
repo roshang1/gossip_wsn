@@ -34,6 +34,7 @@ class Gossip: public VirtualApplication {
   short currentPeerIndex;
   int expectedSeq;
   short wait;
+  int busyCount;
 
  protected:
   void startup();

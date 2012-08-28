@@ -7,7 +7,7 @@ void Gossip::startup() {
   stringstream out;
   string temp, temp2;
 
-  wait = expectedSeq = currentPeerIndex = packetsSent = 0;
+  busyCount = wait = expectedSeq = currentPeerIndex = packetsSent = 0;
   neighbourCheckInterval = STR_SIMTIME(par("neighbourCheckInterval"));
   gossipInterval = STR_SIMTIME(par("gossipInterval"));
   gossipMsg = (self == 0) ? 1 : 0;
@@ -22,6 +22,7 @@ void Gossip::startup() {
 
   temp2 = "5000ms";
   setTimer( SAMPLE_AVG, STR_SIMTIME( temp2.c_str() ) );
+  declareOutput("BUSY signals");
 }
 
 
@@ -109,6 +110,7 @@ void Gossip::fromNetworkLayer(ApplicationPacket * genericPacket, const char *sou
       //Send BUSY signal.
       //trace() << self << " is busy.";
       toNetworkLayer(createGossipDataPacket(GOSSIP_BUSY, extraData , packetsSent++), source);
+      busyCount++;
     } else {
       //Calculate avg, and share.
       isBusy = true;
@@ -186,4 +188,5 @@ void Gossip::finishSpecific(){
   for(i = 0; i < peers.size(); i++) {
     trace() << "Peer No." << peers[i];
   }
+  collectOutput("BUSY signals", "Total BUSY signals", busyCount);
 }
