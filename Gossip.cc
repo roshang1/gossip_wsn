@@ -8,7 +8,7 @@ void Gossip::startup() {
 	string temp, temp2;
 	PEERINFO myInfo;
 
-	rounds = wait = expectedSeq = currentPeerIndex = packetsSent = 0;
+	busyCount = rounds = wait = expectedSeq = currentPeerIndex = packetsSent = 0;
 	neighbourCheckInterval = STR_SIMTIME(par("neighbourCheckInterval"));
 	gossipInterval = STR_SIMTIME(par("gossipInterval"));
 	myInfo.id = self;
@@ -36,6 +36,8 @@ void Gossip::startup() {
 
 	 temp2 = "5000ms";
 	 setTimer(SAMPLE_AVG, STR_SIMTIME( temp2.c_str() ));
+
+	 declareOutput("BUSY signals");
 }
 
 void Gossip::timerFiredCallback(int type) {
@@ -146,8 +148,7 @@ void Gossip::fromNetworkLayer(ApplicationPacket * genericPacket,
 
 	case PULL_NEIGHBOUR:
 		//PUSH selfIP: Temporarily receiver will figure out this from the source IP, add sourceIP to packet later.
-		toNetworkLayer(createGossipDataPacket(PUSH_NEIGHBOUR,
-				(int) peers.size() - 1, packetsSent++), source);
+		toNetworkLayer(createGossipDataPacket(PUSH_NEIGHBOUR,(int) peers.size() - 1, packetsSent++), source);
 		break;
 
 	case PUSH_NEIGHBOUR:
@@ -172,8 +173,8 @@ void Gossip::fromNetworkLayer(ApplicationPacket * genericPacket,
 		if (isBusy) {
 			//Send BUSY signal.
 			//trace() << self << " is busy.";
-			toNetworkLayer(createGossipDataPacket(GOSSIP_BUSY, extraData,
-					packetsSent++), source);
+			toNetworkLayer(createGossipDataPacket(GOSSIP_BUSY, extraData, packetsSent++), source);
+			busyCount++;
 		} else {
 			//Calculate avg, and share.
 			isBusy = true;
@@ -264,4 +265,5 @@ void Gossip::finishSpecific() {
 	for (i = 0; i < peers.size(); i++) {
 		trace() << "Peer No." << peers[i].id;
 	}
+	collectOutput("BUSY signals", "Total BUSY signals",  busyCount);
 }
