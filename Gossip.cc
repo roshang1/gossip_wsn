@@ -33,9 +33,13 @@ void Gossip::startup() {
 	temp2 = out.str();
 	temp2 += "ms";
 	setTimer(START_GOSSIP, STR_SIMTIME(temp2.c_str()));
+
+	 temp2 = "5000ms";
+	 setTimer(SAMPLE_AVG, STR_SIMTIME( temp2.c_str() ));
 }
 
 void Gossip::timerFiredCallback(int type) {
+	string temp2;
 	PEERINFO myInfo;
 	vector<PEERINFO>::iterator it;
 	vector<int> delIndices;
@@ -44,8 +48,17 @@ void Gossip::timerFiredCallback(int type) {
 	int i =0;
 	switch (type) {
 
+
+
+	  case SAMPLE_AVG:{
+		 trace() << "Current Avg = " << gossipMsg;
+		 temp2 = "5000ms";
+		 setTimer(SAMPLE_AVG, STR_SIMTIME( temp2.c_str() ));
+		 break;
+	  }
+
 	case GET_NEIGHBOUR: {
-		trace() << "Request neighbours.";
+		//trace() << "Request neighbours.";
 		//Skip the first element which is the node itself.
 		keepPeers.push_back(peers[0]);
 		for (it = peers.begin() + 1, i = 1; it != peers.end(); ++it, i++) {
@@ -67,10 +80,15 @@ void Gossip::timerFiredCallback(int type) {
 		for (it = peers.begin() + 1; it != peers.end(); ++it) {
 			(*it).weight = (double) 1 / (double) (1 + ((*it).neighbourCount > peers.at(0).neighbourCount ? (*it).neighbourCount : peers.at(0).neighbourCount));
 			sum += (*it).weight;
-			trace() << "Id = " << (*it).id << ", weight = " << (*it).weight	<< ", count = " << (*it).neighbourCount;
+			//trace() << "Id = " << (*it).id << ", weight = " << (*it).weight	<< ", count = " << (*it).neighbourCount;
 		}
 		peers.at(0).weight = (double) 1 - sum;
-		trace() << "Id = " << peers.at(0).id << ", weight = " << peers.at(0).weight << ", count = " << peers.at(0).neighbourCount;
+		(self == 0) && trace() << "Id = " << peers.at(0).id << ", weight = " << peers.at(0).weight << ", count = " << peers.at(0).neighbourCount;
+		for (it = peers.begin() + 1; it != peers.end(); ++it) {
+			(*it).weight = (* (it - 1) ).weight + (*it).weight;
+			(self == 0) && trace() << "Id = " << (*it).id << ", weight = " << (*it).weight << ", count = " << (*it).neighbourCount;
+		}
+		//trace() << "Id = " << peers.at(0).id << ", weight = " << peers.at(0).weight << ", count = " << peers.at(0).neighbourCount;
 
 		newPeers.clear();
 		toNetworkLayer(createGossipDataPacket(PULL_NEIGHBOUR, packetsSent++), BROADCAST_NETWORK_ADDRESS);
@@ -82,7 +100,7 @@ void Gossip::timerFiredCallback(int type) {
 		//    trace() << "Start gossip";
 		if (wait == 2 || !isBusy) {
 			int dest = getPeer();
-			trace() << "Gossip with " << dest;
+			(self == 0)  && trace() << "Gossip with " << dest;
 			if (dest != -1 && dest != self) {
 				GossipInfo send;
 				stringstream out;
@@ -91,7 +109,7 @@ void Gossip::timerFiredCallback(int type) {
 				isBusy = true;
 				out << dest;
 				neighbour = out.str();
-				trace() << "Send " << gossipMsg << " to " << dest;
+				//trace() << "Send " << gossipMsg << " to " << dest;
 				send.data = gossipMsg;
 				send.seq = expectedSeq = self;
 				toNetworkLayer(createGossipDataPacket(GOSSIP_PULL, send,
@@ -153,7 +171,7 @@ void Gossip::fromNetworkLayer(ApplicationPacket * genericPacket,
 	case GOSSIP_PULL:
 		if (isBusy) {
 			//Send BUSY signal.
-			trace() << self << " is busy.";
+			//trace() << self << " is busy.";
 			toNetworkLayer(createGossipDataPacket(GOSSIP_BUSY, extraData,
 					packetsSent++), source);
 		} else {
@@ -164,8 +182,7 @@ void Gossip::fromNetworkLayer(ApplicationPacket * genericPacket,
 
 			toNetworkLayer(createGossipDataPacket(GOSSIP_PUSH, extraData,
 					packetsSent++), source);
-			trace() << "New avg " << extraData.data << " is being sent to "
-					<< source;
+			//trace() << "New avg " << extraData.data << " is being sent to " << source;
 		}
 		break;
 
@@ -179,15 +196,14 @@ void Gossip::fromNetworkLayer(ApplicationPacket * genericPacket,
 					packetsSent++), source);
 			isBusy = false;
 			rounds++;
-			trace() << "Update avg to " << extraData.data << ", send ACK to "
-					<< source;
+			//trace() << "Update avg to " << extraData.data << ", send ACK to "	<< source;
 		}
 		break;
 
 	case GOSSIP_BUSY:
 		//Peer was busy, this node shall try on next trigger.
 		isBusy = false;
-		trace() << "Peer " << source << " was busy";
+		//trace() << "Peer " << source << " was busy";
 		break;
 
 	case GOSSIP_ACK:
@@ -195,7 +211,7 @@ void Gossip::fromNetworkLayer(ApplicationPacket * genericPacket,
 			//ACK recieved, update avg.
 			gossipMsg = receivedData.data;
 			isBusy = false;
-			trace() << "ACK received, new avg = " << gossipMsg;
+			//trace() << "ACK received, new avg = " << gossipMsg;
 		}
 		break;
 
@@ -207,15 +223,15 @@ void Gossip::fromNetworkLayer(ApplicationPacket * genericPacket,
 
 int Gossip::getPeer() {
 	double randNum;
+	vector<PEERINFO>::iterator it;
 
 	if (peers.size() > 1) {
-		currentPeerIndex = (currentPeerIndex + 1) % peers.size(); //Uniformly select peers
+		//currentPeerIndex = (currentPeerIndex + 1) % peers.size(); //Uniformly select peers
 		randNum = (double) rand() / (double) RAND_MAX;
-		//Communicate with given probability
-		if (randNum < peers.at(currentPeerIndex).weight)
-			return peers[currentPeerIndex].id;
-		else
-			return -1;
+		//Communicate with node if randNum < CDF for that node.
+		for (it = peers.begin(); it != peers.end(); ++it)
+			if (randNum < (*it).weight)
+				return (it == peers.begin()) ? -1 : (*it).id;
 	}
 	return -1;
 }
@@ -244,7 +260,7 @@ GossipPacket* Gossip::createGossipDataPacket(double data, int neighbourCount,
 
 void Gossip::finishSpecific() {
 	int i;
-	trace() << "Gossip msg " << gossipMsg << " Rounds = " << rounds;
+	trace() << "Final Avg = " << gossipMsg << " Rounds = " << rounds;
 	for (i = 0; i < peers.size(); i++) {
 		trace() << "Peer No." << peers[i].id;
 	}
