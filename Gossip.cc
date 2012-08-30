@@ -9,6 +9,7 @@ void Gossip::startup() {
 	PEERINFO myInfo;
 
 	lateResponse = droppedRequests = rounds = wait = expectedSeq = packetsSent = 0;
+	gSend = gReceive = gRespond = 0;
 	roundsBeforeStopping = (int) par("stopGossipAfter") ;
 	neighbourCheckInterval = STR_SIMTIME(par("neighbourCheckInterval"));
 	gossipInterval = STR_SIMTIME(par("gossipInterval"));
@@ -104,6 +105,7 @@ void Gossip::timerFiredCallback(int type) {
 		//    trace() << "Start gossip";
 		if (wait == 1 || !isBusy) {
 			//Dequeue
+			expectedSeq = -1;
 			deQueue();
 			int dest = getPeer();
 			(self == 0 || self == 1 || self == 2 || self == 3 || self == 4)  && trace() << "Gossip with " << dest;
@@ -118,6 +120,7 @@ void Gossip::timerFiredCallback(int type) {
 				(self == 0 || self == 1 || self == 2 || self == 3 || self == 4) && trace() << "Send " << gossipMsg << " to " << dest;
 				send.data = gossipMsg;
 				send.seq = expectedSeq = dest;
+				gSend++;
 				toNetworkLayer(createGossipDataPacket(GOSSIP_PULL, send, packetsSent++), neighbour.c_str());
 				wait = 0;
 			}
@@ -158,6 +161,7 @@ void Gossip::deQueue() {
 
 			out << msg.initiator;
 			neighbour = out.str();
+			gRespond++;
 			toNetworkLayer(createGossipDataPacket(GOSSIP_PUSH, sendData, packetsSent++), neighbour.c_str());
 			(self == 0 || self == 1 || self == 2 || self == 3 || self == 4) && trace() << "Dequeued requests: New avg  " << sendData.data << ", is being sent to " << msg.initiator;
 		}else{
@@ -221,12 +225,14 @@ void Gossip::fromNetworkLayer(ApplicationPacket * genericPacket,
 			//Calculate avg, and share.
 			extraData.seq = receivedData.seq;
 			gossipMsg = extraData.data = (gossipMsg + receivedData.data) / 2; //Update Avg, synchronize gossipMsg if different threads perform updates.
+			gRespond++;
 			toNetworkLayer(createGossipDataPacket(GOSSIP_PUSH, extraData, packetsSent++), source);
 			(self == 0 || self == 1 || self == 2 || self == 3 || self == 4) && trace() << "New avg  " << extraData.data << ", is being sent to " << source;
 		}
 		break;
 
 	case GOSSIP_PUSH:
+		gReceive++;
 		if (receivedData.seq == expectedSeq) {
 			//Update avg, send ACK
 			if( (gossipMsg - receivedData.data) != 0) {
@@ -286,6 +292,7 @@ GossipPacket* Gossip::createGossipDataPacket(double data, int neighbourCount,
 void Gossip::finishSpecific() {
 	int i;
 	trace() << "Final Avg = " << gossipMsg << " Rounds = " << rounds;
+	trace() << "gSend = " << gSend << ", gReceive = " << gReceive << ", gRespond = " << gRespond;
 	for (i = 0; i < peers.size(); i++) {
 		trace() << "Peer No." << peers[i].id;
 	}

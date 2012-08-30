@@ -51,6 +51,7 @@ class Gossip: public VirtualApplication {
   int expectedSeq;
   short wait;
   int rounds, lateResponse, droppedRequests;
+  int gSend, gReceive, gRespond;
 
  protected:
   void startup();
