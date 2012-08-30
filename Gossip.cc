@@ -8,7 +8,8 @@ void Gossip::startup() {
 	string temp, temp2;
 	PEERINFO myInfo;
 
-	busyCount = rounds = wait = expectedSeq = currentPeerIndex = packetsSent = 0;
+	lateResponse = droppedRequests = rounds = wait = expectedSeq = packetsSent = 0;
+	roundsBeforeStopping = (int) par("stopGossipAfter") ;
 	neighbourCheckInterval = STR_SIMTIME(par("neighbourCheckInterval"));
 	gossipInterval = STR_SIMTIME(par("gossipInterval"));
 	myInfo.id = self;
@@ -37,7 +38,7 @@ void Gossip::startup() {
 	 temp2 = "5000ms";
 	 setTimer(SAMPLE_AVG, STR_SIMTIME( temp2.c_str() ));
 
-	 declareOutput("BUSY signals");
+	 declareOutput("Wasted Requests");
 }
 
 void Gossip::timerFiredCallback(int type) {
@@ -53,9 +54,9 @@ void Gossip::timerFiredCallback(int type) {
 
 
 	  case SAMPLE_AVG:{
-		 trace() << "Current Avg = " << gossipMsg;
-		 temp2 = "5000ms";
-		 setTimer(SAMPLE_AVG, STR_SIMTIME( temp2.c_str() ));
+	//	 trace() << "Current Avg = " << gossipMsg;
+		// temp2 = "5000ms";
+	//	 setTimer(SAMPLE_AVG, STR_SIMTIME( temp2.c_str() ));
 		 break;
 	  }
 
@@ -84,11 +85,12 @@ void Gossip::timerFiredCallback(int type) {
 			sum += (*it).weight;
 			//trace() << "Id = " << (*it).id << ", weight = " << (*it).weight	<< ", count = " << (*it).neighbourCount;
 		}
+
 		peers.at(0).weight = (double) 1 - sum;
-		(self == 0) && trace() << "Id = " << peers.at(0).id << ", weight = " << peers.at(0).weight << ", count = " << peers.at(0).neighbourCount;
+		//(self == 0 || self == 1 || self == 2 || self == 3 || self == 4) && trace() << "Id = " << peers.at(0).id << ", weight = " << peers.at(0).weight << ", count = " << peers.at(0).neighbourCount;
 		for (it = peers.begin() + 1; it != peers.end(); ++it) {
 			(*it).weight = (* (it - 1) ).weight + (*it).weight;
-			(self == 0) && trace() << "Id = " << (*it).id << ", weight = " << (*it).weight << ", count = " << (*it).neighbourCount;
+		//	(self == 0 || self == 1 || self == 2 || self == 3 || self == 4) && trace() << "Id = " << (*it).id << ", weight = " << (*it).weight << ", count = " << (*it).neighbourCount;
 		}
 		//trace() << "Id = " << peers.at(0).id << ", weight = " << peers.at(0).weight << ", count = " << peers.at(0).neighbourCount;
 
@@ -100,9 +102,11 @@ void Gossip::timerFiredCallback(int type) {
 
 	case START_GOSSIP: {
 		//    trace() << "Start gossip";
-		if (wait == 2 || !isBusy) {
+		if (wait == 1 || !isBusy) {
+			//Dequeue
+			deQueue();
 			int dest = getPeer();
-			(self == 0)  && trace() << "Gossip with " << dest;
+			(self == 0 || self == 1 || self == 2 || self == 3 || self == 4)  && trace() << "Gossip with " << dest;
 			if (dest != -1 && dest != self) {
 				GossipInfo send;
 				stringstream out;
@@ -111,18 +115,54 @@ void Gossip::timerFiredCallback(int type) {
 				isBusy = true;
 				out << dest;
 				neighbour = out.str();
-				//trace() << "Send " << gossipMsg << " to " << dest;
+				(self == 0 || self == 1 || self == 2 || self == 3 || self == 4) && trace() << "Send " << gossipMsg << " to " << dest;
 				send.data = gossipMsg;
-				send.seq = expectedSeq = self;
-				toNetworkLayer(createGossipDataPacket(GOSSIP_PULL, send,
-						packetsSent++), neighbour.c_str());
+				send.seq = expectedSeq = dest;
+				toNetworkLayer(createGossipDataPacket(GOSSIP_PULL, send, packetsSent++), neighbour.c_str());
 				wait = 0;
 			}
 		} else
 			wait++;
-		setTimer(START_GOSSIP, gossipInterval);
+		if( roundsBeforeStopping != 0 )
+			setTimer(START_GOSSIP, gossipInterval);
+		else
+			trace() << "Stop gossip at " << self;
 		break;
 	}
+	}
+}
+
+
+void Gossip::enQueue(GOSSIP_EXCH_MSG peer) {
+	waitQueue.push(peer);
+}
+
+void Gossip::deQueue() {
+	simtime_t currentTime = getClock();
+	GOSSIP_EXCH_MSG msg;
+	simtime_t timeOut = gossipInterval * 1.5;
+	simtime_t waitTime;
+	GossipInfo sendData;
+	int i = 0;
+	int size = waitQueue.size(); //Take a snapshot, the size may keep increasing.
+	stringstream out;
+	string neighbour;
+
+	for(i = 0; i < size; i++){
+		msg = waitQueue.front(); waitQueue.pop();
+		waitTime = currentTime - msg.receivedAt;
+		if(waitTime < timeOut) {
+			gossipMsg = (gossipMsg + msg.data) / 2; //Update Avg
+			sendData.data = gossipMsg;
+			sendData.seq = self;
+
+			out << msg.initiator;
+			neighbour = out.str();
+			toNetworkLayer(createGossipDataPacket(GOSSIP_PUSH, sendData, packetsSent++), neighbour.c_str());
+			(self == 0 || self == 1 || self == 2 || self == 3 || self == 4) && trace() << "Dequeued requests: New avg  " << sendData.data << ", is being sent to " << msg.initiator;
+		}else{
+			droppedRequests++;
+		}
 	}
 }
 
@@ -140,6 +180,7 @@ void Gossip::fromNetworkLayer(ApplicationPacket * genericPacket,
 	double msgType = rcvPacket->getData();
 	GossipInfo receivedData = rcvPacket->getExtraData();
 	GossipInfo extraData;
+	GOSSIP_EXCH_MSG msg;
 	int peer = atoi(source), i;
 	PEERINFO neighbour;
 	bool found = false;
@@ -153,7 +194,6 @@ void Gossip::fromNetworkLayer(ApplicationPacket * genericPacket,
 
 	case PUSH_NEIGHBOUR:
 		//PULL response received, update neighbour list if new peer is discovered.
-		//    trace() << "Neighbour " << peer << "reported back.";
 		for(i = 0; i < peers.size(); i++) {
 			if(peers.at(i).id == peer) {
 				found = true;
@@ -171,51 +211,36 @@ void Gossip::fromNetworkLayer(ApplicationPacket * genericPacket,
 
 	case GOSSIP_PULL:
 		if (isBusy) {
-			//Send BUSY signal.
-			//trace() << self << " is busy.";
-			toNetworkLayer(createGossipDataPacket(GOSSIP_BUSY, extraData, packetsSent++), source);
-			busyCount++;
+			//Enqueue
+			msg.initiator = peer;
+			msg.data = receivedData.data;
+			msg.receivedAt = getClock();
+			enQueue(msg);
+			(self == 0 || self == 1 || self == 2 || self == 3 || self == 4) && trace() << "Add to queue "	<< source;
 		} else {
 			//Calculate avg, and share.
-			isBusy = true;
-			extraData.seq = expectedSeq = receivedData.seq;
-			extraData.data = (gossipMsg + receivedData.data) / 2;
-
-			toNetworkLayer(createGossipDataPacket(GOSSIP_PUSH, extraData,
-					packetsSent++), source);
-			//trace() << "New avg " << extraData.data << " is being sent to " << source;
+			extraData.seq = receivedData.seq;
+			gossipMsg = extraData.data = (gossipMsg + receivedData.data) / 2; //Update Avg, synchronize gossipMsg if different threads perform updates.
+			toNetworkLayer(createGossipDataPacket(GOSSIP_PUSH, extraData, packetsSent++), source);
+			(self == 0 || self == 1 || self == 2 || self == 3 || self == 4) && trace() << "New avg  " << extraData.data << ", is being sent to " << source;
 		}
 		break;
 
 	case GOSSIP_PUSH:
 		if (receivedData.seq == expectedSeq) {
 			//Update avg, send ACK
-			extraData.data = gossipMsg = receivedData.data;
-			extraData.seq = expectedSeq;
-
-			toNetworkLayer(createGossipDataPacket(GOSSIP_ACK, extraData,
-					packetsSent++), source);
-			isBusy = false;
+			if( (gossipMsg - receivedData.data) != 0) {
+				gossipMsg = receivedData.data;
+				(self == 0 || self == 1 || self == 2 || self == 3 || self == 4) && trace() << "Update avg to " << gossipMsg << ", peer was " << source;
+				roundsBeforeStopping = (int) par("stopGossipAfter") ;
+			} else {
+				roundsBeforeStopping--;
+			}
+			isBusy = false; //As busy is set to false, timer will take care of dequeueing accumulated requests.
 			rounds++;
-			//trace() << "Update avg to " << extraData.data << ", send ACK to "	<< source;
-		}
+		} else
+			lateResponse++;
 		break;
-
-	case GOSSIP_BUSY:
-		//Peer was busy, this node shall try on next trigger.
-		isBusy = false;
-		//trace() << "Peer " << source << " was busy";
-		break;
-
-	case GOSSIP_ACK:
-		if (receivedData.seq == expectedSeq) {
-			//ACK recieved, update avg.
-			gossipMsg = receivedData.data;
-			isBusy = false;
-			//trace() << "ACK received, new avg = " << gossipMsg;
-		}
-		break;
-
 	default:
 		trace() << "Incorrect packet received.";
 		break;
@@ -227,7 +252,6 @@ int Gossip::getPeer() {
 	vector<PEERINFO>::iterator it;
 
 	if (peers.size() > 1) {
-		//currentPeerIndex = (currentPeerIndex + 1) % peers.size(); //Uniformly select peers
 		randNum = (double) rand() / (double) RAND_MAX;
 		//Communicate with node if randNum < CDF for that node.
 		for (it = peers.begin(); it != peers.end(); ++it)
@@ -265,5 +289,6 @@ void Gossip::finishSpecific() {
 	for (i = 0; i < peers.size(); i++) {
 		trace() << "Peer No." << peers[i].id;
 	}
-	collectOutput("BUSY signals", "Total BUSY signals",  busyCount);
+	collectOutput("Wasted Requests", "Dropped Requests", droppedRequests);
+	collectOutput("Wasted Requests", "Received Late response for", lateResponse);
 }

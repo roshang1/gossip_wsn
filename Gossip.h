@@ -28,7 +28,14 @@ struct peerInfo {
   double weight;
 };
 
+struct gossipExchMsg {
+	int initiator;
+	double data;
+	simtime_t receivedAt;
+};
+
 typedef struct peerInfo PEERINFO;
+typedef struct gossipExchMsg GOSSIP_EXCH_MSG;
 
 class Gossip: public VirtualApplication {
  private:
@@ -37,12 +44,13 @@ class Gossip: public VirtualApplication {
   //To do: Implement using a list, it's a better option.
   vector<PEERINFO> peers;
   vector<PEERINFO> newPeers;
+  queue<GOSSIP_EXCH_MSG> waitQueue;
   double gossipMsg;
   bool isBusy;
-  short currentPeerIndex;
+  short roundsBeforeStopping;
   int expectedSeq;
   short wait;
-  int rounds, busyCount;
+  int rounds, lateResponse, droppedRequests;
 
  protected:
   void startup();
@@ -57,5 +65,7 @@ class Gossip: public VirtualApplication {
   GossipPacket* createGossipDataPacket(double , unsigned int );
   GossipPacket* createGossipDataPacket(double , GossipInfo , unsigned int );
   GossipPacket* createGossipDataPacket(double , int, unsigned int );
+  void enQueue(GOSSIP_EXCH_MSG);
+  void deQueue();
 };
 #endif
