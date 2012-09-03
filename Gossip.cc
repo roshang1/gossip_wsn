@@ -10,7 +10,7 @@ void Gossip::startup() {
 
 	lateResponse = droppedRequests = rounds = wait = expectedSeq = packetsSent = 0;
 	gSend = gReceive = gRespond = 0;
-	roundsBeforeStopping = (int) par("stopGossipAfter") ;
+	roundsBeforeStopping = par("stopGossipAfter") ;
 	neighbourCheckInterval = STR_SIMTIME(par("neighbourCheckInterval"));
 	gossipInterval = STR_SIMTIME(par("gossipInterval"));
 	myInfo.id = self;
@@ -19,7 +19,8 @@ void Gossip::startup() {
 
 	//Node 0 takes a value 1.
 	//TO DO: Multiple nodes can take value 1; therefore, several gossips may be in progress.
-	gossipMsg = (self == 0) ? 1 : 0;
+	//gossipMsg = (self == 0) ? 1 : 0;
+	gossipMsg = par("gossipMsg");
 	isBusy = false;
 
 	// Start sharing neighbours after some initial interval.
