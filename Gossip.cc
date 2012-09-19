@@ -8,11 +8,12 @@ void Gossip::startup() {
 	string temp, temp2;
 	PEERINFO myInfo;
 
-	lateResponse = droppedRequests = rounds = wait = expectedSeq = packetsSent = 0;
+	duplicates = noResponse = lateResponse = droppedRequests = rounds = wait = expectedSeq = packetsSent = 0;
 	gSend = gReceive = gRespond = 0;
 	roundsBeforeStopping = par("stopGossipAfter") ;
 	neighbourCheckInterval = STR_SIMTIME(par("neighbourCheckInterval"));
-	gossipInterval = STR_SIMTIME(par("gossipInterval"));
+	gossipInterval = ((int) par("nodeStartupDiff")) * (18);
+	trace() << gossipInterval;
 	myInfo.id = self;
 	myInfo.neighbourCount = peers.size(); //Count yourself as well
 	peers.push_back(myInfo);
@@ -21,8 +22,9 @@ void Gossip::startup() {
 	//TO DO: Multiple nodes can take value 1; therefore, several gossips may be in progress.
 	gossipMsg = (self == 0) ? 1 : 0;
 	//gossipMsg = par("gossipMsg");
-	isBusy = false;
+	expectedReceived = isBusy = false;
 
+	assignNeighbours(self);
 	// Start sharing neighbours after some initial interval.
 	out << nodeStartupDiff;
 	temp = out.str();
@@ -35,9 +37,10 @@ void Gossip::startup() {
 	out << nodeStartupDiff;
 	temp2 = out.str();
 	temp2 += "ms";
+	trace() << temp2;
 	setTimer(START_GOSSIP, STR_SIMTIME(temp2.c_str()));
 
-	temp2 = "5000ms";
+	temp2 = "5s";
 	setTimer(SAMPLE_AVG, STR_SIMTIME( temp2.c_str() ));
 
 	 declareOutput("Wasted Requests");
@@ -45,6 +48,7 @@ void Gossip::startup() {
 }
 
 void Gossip::timerFiredCallback(int type) {
+	stringstream out;
 	string temp2;
 	PEERINFO myInfo;
 	vector<PEERINFO>::iterator it;
@@ -59,8 +63,8 @@ void Gossip::timerFiredCallback(int type) {
 
 
 	  case SAMPLE_AVG:{
-		  trace() << "Current Avg = " << gossipMsg;
-		  temp2 = "5000ms";
+		  trace() << "Current Avg = " << gossipMsg << " Rounds = " << rounds;
+		  temp2 = "5s";
 		  setTimer(SAMPLE_AVG, STR_SIMTIME( temp2.c_str() ));
 		 break;
 	  }
@@ -111,14 +115,16 @@ void Gossip::timerFiredCallback(int type) {
 			(self == 2 || self == 3 || self == 27) && trace() << "No change in neighbourCheckInterval";
 		}*/
 		newPeers.clear();
-		toNetworkLayer(createGossipDataPacket(PULL_NEIGHBOUR, packetsSent++), BROADCAST_NETWORK_ADDRESS);
-		setTimer(GET_NEIGHBOUR, neighbourCheckInterval);
+		////toNetworkLayer(createGossipDataPacket(PULL_NEIGHBOUR, packetsSent++), BROADCAST_NETWORK_ADDRESS);
+		////setTimer(GET_NEIGHBOUR, neighbourCheckInterval);
 		break;
 	}
 
 	case START_GOSSIP: {
-		//    trace() << "Start gossip";
-		if (wait == 1 || !isBusy) {
+		//trace() << "Start gossip";
+		//if (wait == 2 || !isBusy) {
+			if(isBusy)
+				noResponse++;
 			//Dequeue
 			expectedSeq = -1;
 			deQueue();
@@ -130,6 +136,7 @@ void Gossip::timerFiredCallback(int type) {
 				string neighbour;
 
 				isBusy = true;
+				expectedReceived = false;
 				out << dest;
 				neighbour = out.str();
 				//(self == 2 || self == 3 || self == 27) && trace() << "Send " << gossipMsg << " to " << dest;
@@ -139,15 +146,20 @@ void Gossip::timerFiredCallback(int type) {
 				toNetworkLayer(createGossipDataPacket(GOSSIP_PULL, send, packetsSent++), neighbour.c_str());
 				wait = 0;
 			}
-		} else
-			wait++;
+		//} else
+			//wait++;
 
-		if( roundsBeforeStopping != 0 )
-			setTimer(START_GOSSIP, gossipInterval);
-		else {
-//			trace() << "Stop gossip at " << self;
-			isBusy = false;
-		}
+		//if( roundsBeforeStopping != 0 ){
+			out.str(string());
+			out << gossipInterval;
+			temp2 = out.str();
+			temp2 += "ms";
+			setTimer(START_GOSSIP, STR_SIMTIME(temp2.c_str()));
+		//}
+		//else {
+			//trace() << "Stop gossip at " << self;
+			//isBusy = false;
+		//}
 		break;
 	}
 	}
@@ -245,12 +257,12 @@ void Gossip::fromNetworkLayer(ApplicationPacket * genericPacket,
 		} else {
 			//Restart stopped gossip if required.
 			//(self == 2 || self == 3 || self == 27) && trace() << "roundsBeforeStopping " << roundsBeforeStopping << " gossipMsg " << gossipMsg << " receivedData.data " << receivedData.data;
-			if( roundsBeforeStopping <= 0 && (gossipMsg != receivedData.data)) {
+			/*if( roundsBeforeStopping <= 0 && (gossipMsg != receivedData.data)) {
 				roundsBeforeStopping = (int) par("stopGossipAfter");
 				setTimer(START_GOSSIP, gossipInterval);
 				isBusy = false;
-	//			trace() << "Restart gossip at " << self;
-			}
+				trace() << "Restart gossip at " << self;
+			}*/
 			//Calculate avg, and share.
 			extraData.seq = receivedData.seq;
 			gossipMsg = extraData.data = (gossipMsg + receivedData.data) / 2; //Update Avg, synchronize gossipMsg if different threads perform updates.
@@ -264,6 +276,7 @@ void Gossip::fromNetworkLayer(ApplicationPacket * genericPacket,
 	case GOSSIP_PUSH:
 		if (receivedData.seq == expectedSeq) {
 			gReceive++;
+			//expectedSeq = -1;
 			//Update avg, send ACK
 			if( (gossipMsg - receivedData.data) != 0) {
 				gossipMsg = receivedData.data;
@@ -272,7 +285,12 @@ void Gossip::fromNetworkLayer(ApplicationPacket * genericPacket,
 				roundsBeforeStopping--;
 			}
 			isBusy = false; //As busy is set to false, timer will take care of dequeueing accumulated requests.
-			rounds++;
+			if(!expectedReceived){
+				expectedReceived = true;
+				rounds++;
+			}else{
+				duplicates++;
+			}
 		} else
 			lateResponse++;
 		break;
@@ -330,4 +348,299 @@ void Gossip::finishSpecific() {
 	collectOutput("Stats", "Sent", gSend);
 	collectOutput("Stats", "Got Back", gReceive);
 	collectOutput("Stats", "Responded to", gRespond);
+	collectOutput("Stats", "No Response", noResponse);
+	collectOutput("Stats", "Duplicates", duplicates);
+}
+
+void Gossip::assignNeighbours (int id) {
+	PEERINFO neighbour;
+	switch (id) {
+
+	case 0:
+		neighbour.id = 1;
+		neighbour.staleness = 0;
+		neighbour.neighbourCount = 3;
+		newPeers.push_back(neighbour);
+
+		neighbour.id = 2;
+		neighbour.staleness = 0;
+		neighbour.neighbourCount = 3;
+		newPeers.push_back(neighbour);
+
+		neighbour.id = 3;
+		neighbour.staleness = 0;
+		neighbour.neighbourCount = 3;
+		newPeers.push_back(neighbour);
+
+		neighbour.id = 4;
+		neighbour.staleness = 0;
+		neighbour.neighbourCount = 3;
+		newPeers.push_back(neighbour);
+
+		break;
+	case 1:
+		neighbour.id = 0;
+		neighbour.staleness = 0;
+		neighbour.neighbourCount = 4;
+		newPeers.push_back(neighbour);
+
+		neighbour.id = 6;
+		neighbour.staleness = 0;
+		neighbour.neighbourCount = 2;
+		newPeers.push_back(neighbour);
+
+		neighbour.id = 7;
+		neighbour.staleness = 0;
+		neighbour.neighbourCount = 3;
+		newPeers.push_back(neighbour);
+		break;
+
+	case 2:
+		neighbour.id = 0;
+		neighbour.staleness = 0;
+		neighbour.neighbourCount = 4;
+		newPeers.push_back(neighbour);
+
+		neighbour.id = 8;
+		neighbour.staleness = 0;
+		neighbour.neighbourCount = 2;
+		newPeers.push_back(neighbour);
+
+		neighbour.id = 7;
+		neighbour.staleness = 0;
+		neighbour.neighbourCount = 3;
+		newPeers.push_back(neighbour);
+		break;
+
+	case 3:
+		neighbour.id = 0;
+		neighbour.staleness = 0;
+		neighbour.neighbourCount = 4;
+		newPeers.push_back(neighbour);
+
+		neighbour.id = 6;
+		neighbour.staleness = 0;
+		neighbour.neighbourCount = 2;
+		newPeers.push_back(neighbour);
+
+		neighbour.id = 5;
+		neighbour.staleness = 0;
+		neighbour.neighbourCount = 2;
+		newPeers.push_back(neighbour);
+		break;
+
+	case 4:
+		neighbour.id = 0;
+		neighbour.staleness = 0;
+		neighbour.neighbourCount = 4;
+		newPeers.push_back(neighbour);
+
+		neighbour.id = 8;
+		neighbour.staleness = 0;
+		neighbour.neighbourCount = 2;
+		newPeers.push_back(neighbour);
+
+		neighbour.id = 5;
+		neighbour.staleness = 0;
+		neighbour.neighbourCount = 2;
+		newPeers.push_back(neighbour);
+		break;
+
+	case 5:
+		neighbour.id = 3;
+		neighbour.staleness = 0;
+		neighbour.neighbourCount = 3;
+		newPeers.push_back(neighbour);
+
+		neighbour.id = 4;
+		neighbour.staleness = 0;
+		neighbour.neighbourCount = 3;
+		newPeers.push_back(neighbour);
+		break;
+
+	case 6:
+		neighbour.id = 3;
+		neighbour.staleness = 0;
+		neighbour.neighbourCount = 3;
+		newPeers.push_back(neighbour);
+
+		neighbour.id = 1;
+		neighbour.staleness = 0;
+		neighbour.neighbourCount = 3;
+		newPeers.push_back(neighbour);
+		break;
+
+	case 8:
+		neighbour.id = 4;
+		neighbour.staleness = 0;
+		neighbour.neighbourCount = 3;
+		newPeers.push_back(neighbour);
+
+		neighbour.id = 2;
+		neighbour.staleness = 0;
+		neighbour.neighbourCount = 3;
+		newPeers.push_back(neighbour);
+		break;
+
+	case 7:
+		neighbour.id = 1;
+		neighbour.staleness = 0;
+		neighbour.neighbourCount = 3;
+		newPeers.push_back(neighbour);
+
+		neighbour.id = 2;
+		neighbour.staleness = 0;
+		neighbour.neighbourCount = 3;
+		newPeers.push_back(neighbour);
+
+		neighbour.id = 9;
+		neighbour.staleness = 0;
+		neighbour.neighbourCount = 3;
+		newPeers.push_back(neighbour);
+		break;
+
+	case 9:
+		neighbour.id = 7;
+		neighbour.staleness = 0;
+		neighbour.neighbourCount = 3;
+		newPeers.push_back(neighbour);
+
+		neighbour.id = 10;
+		neighbour.staleness = 0;
+		neighbour.neighbourCount = 3;
+		newPeers.push_back(neighbour);
+
+		neighbour.id = 12;
+		neighbour.staleness = 0;
+		neighbour.neighbourCount = 3;
+		newPeers.push_back(neighbour);
+		break;
+
+	case 13:
+		neighbour.id = 10;
+		neighbour.staleness = 0;
+		neighbour.neighbourCount = 3;
+		newPeers.push_back(neighbour);
+
+
+		neighbour.id = 12;
+		neighbour.staleness = 0;
+		neighbour.neighbourCount = 3;
+		newPeers.push_back(neighbour);
+
+		neighbour.id = 14;
+		neighbour.staleness = 0;
+		neighbour.neighbourCount = 3;
+		newPeers.push_back(neighbour);
+
+		neighbour.id = 16;
+		neighbour.staleness = 0;
+		neighbour.neighbourCount = 3;
+		newPeers.push_back(neighbour);
+		break;
+
+	case 16:
+		neighbour.id = 13;
+		neighbour.staleness = 0;
+		neighbour.neighbourCount = 4;
+		newPeers.push_back(neighbour);
+
+		neighbour.id = 15;
+		neighbour.staleness = 0;
+		neighbour.neighbourCount = 2;
+		newPeers.push_back(neighbour);
+
+		neighbour.id = 17;
+		neighbour.staleness = 0;
+		neighbour.neighbourCount = 2;
+		newPeers.push_back(neighbour);
+		break;
+
+	case 14:
+			neighbour.id = 13;
+			neighbour.staleness = 0;
+			neighbour.neighbourCount = 4;
+			newPeers.push_back(neighbour);
+
+			neighbour.id = 11;
+			neighbour.staleness = 0;
+			neighbour.neighbourCount = 2;
+			newPeers.push_back(neighbour);
+
+			neighbour.id = 17;
+			neighbour.staleness = 0;
+			neighbour.neighbourCount = 2;
+			newPeers.push_back(neighbour);
+			break;
+
+	case 12:
+			neighbour.id = 13;
+			neighbour.staleness = 0;
+			neighbour.neighbourCount = 4;
+			newPeers.push_back(neighbour);
+
+			neighbour.id = 9;
+			neighbour.staleness = 0;
+			neighbour.neighbourCount = 3;
+			newPeers.push_back(neighbour);
+
+			neighbour.id = 15;
+			neighbour.staleness = 0;
+			neighbour.neighbourCount = 2;
+			newPeers.push_back(neighbour);
+			break;
+
+	case 10:
+			neighbour.id = 0;
+			neighbour.staleness = 0;
+			neighbour.neighbourCount = 4;
+			newPeers.push_back(neighbour);
+
+			neighbour.id = 9;
+			neighbour.staleness = 0;
+			neighbour.neighbourCount = 3;
+			newPeers.push_back(neighbour);
+
+			neighbour.id = 11;
+			neighbour.staleness = 0;
+			neighbour.neighbourCount = 2;
+			newPeers.push_back(neighbour);
+			break;
+
+	case 15:
+			neighbour.id = 12;
+			neighbour.staleness = 0;
+			neighbour.neighbourCount = 3;
+			newPeers.push_back(neighbour);
+
+			neighbour.id = 16;
+			neighbour.staleness = 0;
+			neighbour.neighbourCount = 3;
+			newPeers.push_back(neighbour);
+			break;
+
+	case 11:
+			neighbour.id = 14;
+			neighbour.staleness = 0;
+			neighbour.neighbourCount = 3;
+			newPeers.push_back(neighbour);
+
+			neighbour.id = 10;
+			neighbour.staleness = 0;
+			neighbour.neighbourCount = 3;
+			newPeers.push_back(neighbour);
+			break;
+
+	case 17:
+			neighbour.id = 16;
+			neighbour.staleness = 0;
+			neighbour.neighbourCount = 3;
+			newPeers.push_back(neighbour);
+
+			neighbour.id = 14;
+			neighbour.staleness = 0;
+			neighbour.neighbourCount = 3;
+			newPeers.push_back(neighbour);
+			break;
+	}
 }

@@ -46,12 +46,12 @@ class Gossip: public VirtualApplication {
   vector<PEERINFO> newPeers;
   queue<GOSSIP_EXCH_MSG> waitQueue;
   double gossipMsg;
-  bool isBusy;
+  bool isBusy, expectedReceived;
   short roundsBeforeStopping;
   int expectedSeq;
   short wait;
   int rounds, lateResponse, droppedRequests;
-  int gSend, gReceive, gRespond;
+  int gSend, gReceive, gRespond, noResponse, duplicates;
 
  protected:
   void startup();
@@ -61,6 +61,7 @@ class Gossip: public VirtualApplication {
   void handleNeworkControlMessage(cMessage *);
   void fromNetworkLayer(ApplicationPacket *, const char *, double, double);
 
+  void assignNeighbours(int);
   void doGossip();
   int getPeer();
   GossipPacket* createGossipDataPacket(double , unsigned int );
