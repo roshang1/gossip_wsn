@@ -32,6 +32,7 @@ struct gossipExchMsg {
 	int initiator;
 	double data;
 	simtime_t receivedAt;
+	int seq;
 };
 
 typedef struct peerInfo PEERINFO;
