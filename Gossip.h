@@ -21,7 +21,7 @@ enum GOSSIP_CONTROL_MSGS {
 };
 
 enum GOSSIP_TIMERS {
-	GET_NEIGHBOUR = 1, START_GOSSIP = 2, SAMPLE_AVG = 3
+	GET_NEIGHBOUR = 1, START_GOSSIP = 2, SAMPLE_VALUE = 3
 };
 
 struct peerInfo {
@@ -56,6 +56,7 @@ private:
 
 	bool compareDouble(double num1, double num2);
 	void assignNeighbours (int id);
+	double gossipFunction(double, double);
 
 protected:
 	void startup();
