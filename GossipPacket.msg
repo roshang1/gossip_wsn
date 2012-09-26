@@ -19,8 +19,8 @@ cplusplus {{
 packet ApplicationPacket;
 
 struct GossipInfo {
-       double data;
-       int seq;
+       double data[1100];
+     	 int seq;
 };
 
 

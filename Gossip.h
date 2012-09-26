@@ -9,6 +9,7 @@
 using namespace std;
 
 #define EPSILON 0.0001
+#define arrayLength(a) ( sizeof ( a ) / sizeof ( *a ) )
 
 enum GOSSIP_CONTROL_MSGS {
 	PULL_NEIGHBOUR = 1,
@@ -33,6 +34,7 @@ struct gossipExchMsg {
 	int initiator;
 	double data;
 	simtime_t receivedAt;
+	int seq;
 };
 
 typedef struct peerInfo PEERINFO;
@@ -46,7 +48,8 @@ private:
 	vector<PEERINFO> peers;
 	vector<PEERINFO> newPeers;
 	queue<GOSSIP_EXCH_MSG> waitQueue;
-	double gossipMsg;
+	int noOfSamples;
+	double gossipMsg[1100];
 	bool isBusy;
 	short roundsBeforeStopping;
 	int expectedSeq;
@@ -56,7 +59,14 @@ private:
 
 	bool compareDouble(double num1, double num2);
 	void assignNeighbours (int id);
-	double gossipFunction(double, double);
+	//When this method completes, myData will contain data as per the gossip function defined.
+	void gossipFunction(double* myData, double* neighboursData);
+	void copyArray(double* src, double* dest);
+	bool compareArray(double* first, double* second);
+	bool printArray(double* data);
+	double unifRandom();
+	double calculateSum();
+	int computeR(double delta, double epsilon);
 
 protected:
 	void startup();
@@ -70,7 +80,7 @@ protected:
 	GossipPacket* createGossipDataPacket(double, unsigned int);
 	GossipPacket* createGossipDataPacket(double, GossipInfo, unsigned int);
 	GossipPacket* createGossipDataPacket(double, int, unsigned int);
-	void enQueue(GOSSIP_EXCH_MSG);
-	void deQueue();
+/*	void enQueue(GOSSIP_EXCH_MSG);
+	void deQueue();*/
 };
 #endif
