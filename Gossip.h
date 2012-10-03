@@ -48,8 +48,8 @@ private:
 	vector<PEERINFO> peers;
 	vector<PEERINFO> newPeers;
 	queue<GOSSIP_EXCH_MSG> waitQueue;
-	int noOfSamples;
-	double gossipMsg[1100];
+	int noOfSamples, msgSize; // Make this parameter configurable
+	double gossipMsg[1000];
 	bool isBusy;
 	short roundsBeforeStopping;
 	int expectedSeq;
@@ -60,10 +60,10 @@ private:
 	bool compareDouble(double num1, double num2);
 	void assignNeighbours (int id);
 	//When this method completes, myData will contain data as per the gossip function defined.
-	void gossipFunction(double* myData, double* neighboursData);
-	void copyArray(double* src, double* dest);
-	bool compareArray(double* first, double* second);
-	bool printArray(double* data);
+	void gossipFunction(double* neighboursData, short msgStart);
+	void copyArray( double* dest, short msgStart);
+	bool compareArray(double* neighboursData, short msgStart);
+	bool printArray(double* data, short msgStart);
 	double unifRandom();
 	double calculateSum();
 	int computeR(double delta, double epsilon);
