@@ -24,6 +24,7 @@ void Gossip::startup() {
 	string temp;
 	PEERINFO myInfo;
 	int nodeStartupDiff = ((int) par("nodeStartupDiff")) * self;
+	nodeStartupDiff += 2000;
 	double xi = unifRandom() * 100;
 	trace() << xi;
 
@@ -33,11 +34,13 @@ void Gossip::startup() {
 
 	lateResponse = droppedRequests = rounds = wait = expectedSeq = packetsSent = 0;
 	gSend = gReceive = gRespond = 0;
-	noOfSamples = 1000;
+	noOfSamples = 300;
 	msgSize = 10;
-	for(i = 0; i < noOfSamples; i++)
+	for(i = 0; i < noOfSamples; i++){
 		//gossipMsg[i] = (self == 0) ? 0 : 1;
 		gossipMsg[i] = -log(unifRandom()) / xi;
+		//trace() << gossipMsg[i] ;
+	}
 	//gossipMsg = par("gossipMsg");
 	//isBusy = false;
 
@@ -55,8 +58,9 @@ void Gossip::startup() {
 	out << nodeStartupDiff;	temp = out.str(); temp += "ms";
 	setTimer(START_GOSSIP, STR_SIMTIME(temp.c_str()));
 
-/*	temp = "500ms";
-	setTimer(SAMPLE_VALUE, STR_SIMTIME(temp.c_str()));*/
+	temp = "500ms";
+	//setTimer(SAMPLE_VALUE, STR_SIMTIME(temp.c_str()));
+	setTimer(PROCESS_SAMPLES, STR_SIMTIME(temp.c_str()));
 
 	declareOutput("Wasted Requests");
 	declareOutput("Stats");
@@ -76,10 +80,10 @@ void Gossip::timerFiredCallback(int type) {
 
 	case SAMPLE_VALUE: {
 		string temp = "500ms";
-		for( i = 0; i < noOfSamples; i++ )
-			out << gossipMsg[i] << " ";
 
-		trace() << "Values = " << out.str() << " after rounds = " << rounds;
+		for(map<int, SAMPLES_AND_COUNT>::iterator ii = msgsFromSenders.begin(); ii != msgsFromSenders.end(); ii++)
+			trace() << ii->first << " " << ii->second.count;
+
 		setTimer(SAMPLE_VALUE, STR_SIMTIME(temp.c_str()));
 		break;
 	}
@@ -129,73 +133,75 @@ void Gossip::timerFiredCallback(int type) {
 	}
 
 	case START_GOSSIP: {
-		//if (wait == 1 || !isBusy) {
-			//Dequeue
-			//expectedSeq = -1;
-			//deQueue();
 			int dest = getPeer();
 			if (dest != -1) {
-				GossipInfo send;
+				GossipInfo *send;
 				string neighbour;
-
+				list<int> sendLater;
 				isBusy = true;
 				out << dest; neighbour = out.str();
-				send.start = (int)(unifRandom() * 100) * 10 + 1;
-				copyArray(send.data, send.start);
-				send.seq = expectedSeq = packetsSent++;
-				gSend++;
-				(self == 0 || self == 1) && trace() << "Sending: " << send.start;
-				(self == 0 || self == 1) && printArray(send.data, 0);
-				toNetworkLayer(createGossipDataPacket(GOSSIP_PULL, send, expectedSeq), neighbour.c_str());
+
+				for(i = 0; i < noOfSamples / msgSize ; i++) {
+					// TO DO: Check the memory usage of the program, if its too high use an array of pointers to preallocated GossipInfo structs.
+					if( unifRandom() >= 0.5 ) {
+						send = new GossipInfo();
+						send->start = i * 10;
+						copyArray(gossipMsg, send->data, send->start, 0);
+						send->seq = expectedSeq = packetsSent++;
+						gSend++;
+						//(self == 0 || self == 1) && trace() << "Sending: " << send->start;
+						//(self == 0 || self == 1) && printArray(send->data, 0);
+						toNetworkLayer(createGossipDataPacket(GOSSIP_PULL, *send, expectedSeq), neighbour.c_str());
+					} else
+						sendLater.push_back(i);
+				}
+
+				for(list<int>::iterator ii = sendLater.begin(); ii != sendLater.end(); ii++){
+					send = new GossipInfo();
+					send->start = (*ii) * 10;
+					copyArray(gossipMsg, send->data, send->start, 0);
+					send->seq = expectedSeq = packetsSent++;
+					gSend++;
+					//(self == 0 || self == 1) && trace() << "Sending: " << send->start;
+					//(self == 0 || self == 1) && printArray(send->data, 0);
+					toNetworkLayer(createGossipDataPacket(GOSSIP_PULL, *send, expectedSeq), neighbour.c_str());
+				}
 				wait = 0;
 			}
-//		} else
-	//		wait++;
-
-	//	if (roundsBeforeStopping != 0)
 			setTimer(START_GOSSIP, gossipInterval);
-/*		else {
-			trace() << "Stop gossip.";
-			isBusy = false;
-		}*/
+
+		break;
+	}
+
+	case PROCESS_SAMPLES: {
+		//Process collected samples from peers, if the last message was received about more than a second ago. Then discard samples.
+		//If there arent enough samples even after timeout discard the samples.
+
+		//??TO DO: Does this need synchronization with the fromNetworkLayer method, both access msgsFromSenders simultaneously
+		simtime_t timeout = STR_SIMTIME("1000ms"); //TO DO: make this configurable
+		int sampleThreshold = 100; //TO DO: Find out what is a good number for required accuracy and adjust accordingly.
+		list<int> removeFromMap;
+		string temp;
+
+		for(map<int, SAMPLES_AND_COUNT>::iterator ii = msgsFromSenders.begin(); ii != msgsFromSenders.end(); ii++) {
+			if( (getClock() - ii->second.lastMsgReceivedAt) >= timeout) {
+				if( ii->second.count >= sampleThreshold )
+					//process(ii->second.samples, ii->second.count);
+					gossipFunction(ii->second.samples);
+				removeFromMap.push_back(ii->first);
+			}
+		}
+
+		//Might need to acquire lock
+		for(list<int>::iterator ii = removeFromMap.begin(); ii != removeFromMap.end(); ii++)
+			msgsFromSenders.erase( (*ii) );
+
+		temp = "200ms"; //TO DO : Vary this parameter and check the behaviour.
+		setTimer(PROCESS_SAMPLES, STR_SIMTIME(temp.c_str()));
 		break;
 	}
 	}
 }
-
-/*void Gossip::enQueue(GOSSIP_EXCH_MSG peer) {
-	waitQueue.push(peer);
-}
-
-void Gossip::deQueue() {
-	simtime_t currentTime = getClock();
-	GOSSIP_EXCH_MSG msg;
-	simtime_t timeOut = gossipInterval * 1.5;
-	simtime_t waitTime;
-	GossipInfo sendData;
-	int i = 0;
-	int size = waitQueue.size(); //Take a snapshot, the size may keep increasing.
-	stringstream out;
-	string neighbour;
-
-	for (i = 0; i < size; i++) {
-		msg = waitQueue.front();
-		waitQueue.pop();
-		waitTime = currentTime - msg.receivedAt;
-		if (waitTime < timeOut) {
-			gossipMsg = (gossipMsg + msg.data) / 2; //Update Avg
-			sendData.data = gossipMsg;
-			sendData.seq = msg.seq;
-
-			out << msg.initiator;
-			neighbour = out.str();
-			gRespond++;
-			toNetworkLayer(createGossipDataPacket(GOSSIP_PUSH, sendData, packetsSent++), neighbour.c_str());
-		} else {
-			droppedRequests++;
-		}
-	}
-}*/
 
 void Gossip::fromNetworkLayer(ApplicationPacket * genericPacket, const char *source, double rssi, double lqi) {
 	GossipPacket *rcvPacket = check_and_cast<GossipPacket*> (genericPacket);
@@ -232,51 +238,44 @@ void Gossip::fromNetworkLayer(ApplicationPacket * genericPacket, const char *sou
 		break;
 
 	case GOSSIP_PULL:
-		/*if (isBusy) {
-			//Enqueue
-			msg.initiator = peer;
-			msg.data = receivedData.data;
-			msg.seq = receivedData.seq;
-			msg.receivedAt = getClock();
-			enQueue(msg);
-		} else {*/
-			//Restart stopped gossip if required, this will certainly affect any ongoing schedule.
-			if (roundsBeforeStopping <= 0 && ( !compareArray(receivedData.data, receivedData.start) )) {
-				roundsBeforeStopping = (int) par("stopGossipAfter");
-				trace() << "Restart gossip";
-				setTimer(START_GOSSIP, gossipInterval);
-				//isBusy = false;
-			}
-			//Calculate avg, and share.
-			sendData.seq = receivedData.seq;
-			sendData.start = receivedData.start;
-			(self == 0 || self == 1) && trace() << "Received: " << receivedData.start;
-			(self == 0 || self == 1) && printArray(receivedData.data, 0);
-			gossipFunction(receivedData.data, receivedData.start);
-			copyArray(sendData.data, receivedData.start);
-			gRespond++;
-			(self == 0 || self == 1) && trace() << "Responding with: " << receivedData.start;
-			(self == 0 || self == 1) && printArray(sendData.data, 0);
-			toNetworkLayer(createGossipDataPacket(GOSSIP_PUSH, sendData, packetsSent++), source);
-			//TO DO: Restart stopped gossip if node receives different values from other nodes.
-		//}
+		//If map contains src, insert data.
+		//else create new entry in map to store msgs.
+		//(ensure that the array is deleted after processing)
+
+		//(self == 0 || self == 1) && trace() << "Received: " << receivedData.start;
+		//(self == 0 || self == 1) && printArray(receivedData.data, 0);
+
+		SAMPLES_AND_COUNT* receivedSamples;
+		//double *samples;
+		if(msgsFromSenders.count(peer) == 0) {
+			//(self == 0 || self == 1) && trace() << "Adding peer.";
+
+			receivedSamples = new SAMPLES_AND_COUNT();
+			//samples = new double[noOfSamples];
+
+			fill_n(receivedSamples->samples, noOfSamples, -1.0);
+			copyArray(receivedData.data, receivedSamples->samples, 0, receivedData.start);
+
+			//receivedSamples->samples = samples;
+			receivedSamples->count = msgSize;
+			receivedSamples->lastMsgReceivedAt = getClock();
+			msgsFromSenders[peer] = *receivedSamples;
+
+			//(self == 0 || self == 1) && printArray(receivedSamples->samples, receivedData.start);
+			//(self == 0 || self == 1) && trace() << "Count " << receivedSamples->count;
+		} else {
+			//(self == 0 || self == 1) && trace() << "Peer exists.";
+			//(self == 0 || self == 1) && trace() << "Count before update " << msgsFromSenders[peer].count << " msg size " << msgSize;
+
+			msgsFromSenders[peer].count += msgSize;
+			msgsFromSenders[peer].lastMsgReceivedAt = getClock();
+			copyArray(receivedData.data, msgsFromSenders[peer].samples, 0, receivedData.start);
+
+			//(self == 0 || self == 1) && printArray(msgsFromSenders[peer].samples, receivedData.start);
+			//(self == 0 || self == 1) && trace() << "Count " << msgsFromSenders[peer].count;
+		}
 		break;
 
-	case GOSSIP_PUSH:
-		if (receivedData.seq == expectedSeq) {
-			gReceive++;
-			(self == 0 || self == 1) && trace() << "Received back:  " << receivedData.start;
-			(self == 0 || self == 1) && printArray(receivedData.data, 0);
-			//Update avg, send ACK
-			if ( !compareArray(receivedData.data, receivedData.start) )
-				gossipFunction(receivedData.data, receivedData.start);
-			else
-				roundsBeforeStopping--;
-			isBusy = false; //As busy is set to false, timer will take care of dequeueing accumulated requests.
-			rounds++;
-		} else
-			lateResponse++;
-		break;
 	default:
 		trace() << "Incorrect packet received.";
 		break;
@@ -292,22 +291,40 @@ double Gossip::gossipFunction(double myValue, double neighboursValue) {
 /**
  * First argument must be gossipMsg i.e. the samples, not the data received in gossip msg.
  */
-void Gossip::gossipFunction(double* neighboursData, short msgStart) {
+void Gossip::gossipFunction(double* neighboursData) {
 	int i;
-	int end = msgStart + msgSize;
-	for( i = msgStart; i < end ; i++ )
-		if(gossipMsg[i] > neighboursData[i - msgStart])
-			gossipMsg[i] = neighboursData[i - msgStart];
+	rounds++;
+	for( i = 0; i < noOfSamples; i++ )
+		if(neighboursData[i] != -1.0 && gossipMsg[i] > neighboursData[i])
+			gossipMsg[i] = neighboursData[i];
+}
+
+void Gossip::process(double* neighbourData, short count){
+	printToCompare(neighbourData);
+
+	if( count == noOfSamples )
+		gossipFunction(neighbourData);
+	else {
+		int i;
+		//Estimate neighbour's value
+		double neighbour_xi = calculateXi(neighbourData, count);
+		//Generate missing values.
+		for( i = 0; i < noOfSamples; i++ ){
+			if(neighbourData[i] == -1.0)
+				neighbourData[i] = -log(unifRandom()) / neighbour_xi;
+		}
+		gossipFunction(neighbourData);
+	}
 }
 
 /**
  * First argument must be gossipMsg i.e. the samples, not the data received in gossip msg.
  */
-void Gossip::copyArray( double* dest, short msgStart) {
-	int i;
-	int end = msgStart + msgSize;
-	for( i = msgStart; i < end ; i++ )
-		dest[i - msgStart] = gossipMsg[i];
+void Gossip::copyArray(double* src, double* dest, short srcStart, short destStart) {
+	int i, j;
+	int end = srcStart + msgSize;
+	for( i = srcStart, j = destStart; i < end ; i++, j++)
+		dest[j] = src[i];
 }
 
 /**
@@ -316,22 +333,27 @@ void Gossip::copyArray( double* dest, short msgStart) {
 bool Gossip::compareArray(double* neighboursData, short msgStart) {
 	int i;
 	int end = msgStart + msgSize;
-	for( i = msgStart; i < end; i++ )
+	for( i = msgStart; i < end && i < noOfSamples; i++ )
 		if(!compareDouble(gossipMsg[i], neighboursData[i - msgStart]))
 			return false;
 	return true;
 }
 
-bool Gossip::printArray(double* data, short msgStart) {
+void Gossip::printToCompare(double* data) {
+	int i;
+	for( i = 0; i < noOfSamples; i++ )
+		trace() << gossipMsg[i] << " " << data[i];
+}
+
+void Gossip::printArray(double* data, short msgStart) {
 	int i;
 	stringstream out;
 	int end = msgStart + msgSize;
 
-	for( i = msgStart; i < end; i++ )
+	for( i = msgStart; i < end && i < noOfSamples; i++ )
 		out << data[i] << " ";
 
 	trace() << "Data: " << out.str() ;
-	return true;
 }
 
 bool Gossip::compareDouble(double num1, double num2) {
@@ -359,7 +381,7 @@ GossipPacket* Gossip::createGossipDataPacket(double data, unsigned int seqNum) {
 	return newPacket;
 }
 
-GossipPacket* Gossip::createGossipDataPacket(double data, GossipInfo extra,	unsigned int seqNum) {
+GossipPacket* Gossip::createGossipDataPacket(double data, GossipInfo& extra,	unsigned int seqNum) {
 	GossipPacket *newPacket = createGossipDataPacket(data, seqNum);
 	newPacket->setExtraData(extra);
 	newPacket->setByteLength(msgSize * 8 + 4 + 2); // size of extradata.
@@ -373,13 +395,14 @@ GossipPacket* Gossip::createGossipDataPacket(double data, int neighbourCount, un
 	return newPacket;
 }
 
-double Gossip::calculateSum() {
-	int size = noOfSamples;
+double Gossip::calculateXi(double* samples,short sampleCount) {
 	int i ;
 	double sum = 0.0;
-	for( i = 0; i < size; i++ )
-		sum += gossipMsg[i];
-	return noOfSamples / sum;
+	for( i = 0; i < noOfSamples; i++ ){
+		if(samples[i] >= 0.0)
+			sum += samples[i];
+	}
+	return sampleCount / sum;
 }
 
 void Gossip::finishSpecific() {
@@ -387,7 +410,7 @@ void Gossip::finishSpecific() {
 	stringstream out;
 	int size = arrayLength(gossipMsg);
 
-	out << calculateSum();
+	out << calculateXi(gossipMsg, noOfSamples);
 
 	trace() << "Final Sum = " << out.str() << " Rounds = " << rounds;
 	for (i = 0; i < peers.size(); i++) {
