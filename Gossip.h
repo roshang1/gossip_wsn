@@ -42,7 +42,7 @@ struct gossipExchMsg {
 };
 
 struct samples_and_count {
-	double samples[300];
+	double samples[1000];
 	short count;
 	simtime_t lastMsgReceivedAt;
 };
@@ -61,7 +61,7 @@ private:
 	queue<GOSSIP_EXCH_MSG> waitQueue;
 	map<int, SAMPLES_AND_COUNT> msgsFromSenders;
 	int noOfSamples, msgSize; // Make these parameter configurable
-	double gossipMsg[300];
+	double gossipMsg[1000];
 	bool isBusy;
 	short roundsBeforeStopping;
 	int expectedSeq;

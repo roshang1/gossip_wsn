@@ -34,7 +34,7 @@ void Gossip::startup() {
 
 	lateResponse = droppedRequests = rounds = wait = expectedSeq = packetsSent = 0;
 	gSend = gReceive = gRespond = 0;
-	noOfSamples = 300;
+	noOfSamples = 1000;
 	msgSize = 10;
 	for(i = 0; i < noOfSamples; i++){
 		//gossipMsg[i] = (self == 0) ? 0 : 1;
@@ -59,7 +59,7 @@ void Gossip::startup() {
 	setTimer(START_GOSSIP, STR_SIMTIME(temp.c_str()));
 
 	temp = "500ms";
-	//setTimer(SAMPLE_VALUE, STR_SIMTIME(temp.c_str()));
+//	setTimer(SAMPLE_VALUE, STR_SIMTIME(temp.c_str()));
 	setTimer(PROCESS_SAMPLES, STR_SIMTIME(temp.c_str()));
 
 	declareOutput("Wasted Requests");
@@ -135,6 +135,7 @@ void Gossip::timerFiredCallback(int type) {
 	case START_GOSSIP: {
 			int dest = getPeer();
 			if (dest != -1) {
+				trace() << "Sending to " << dest; ;
 				GossipInfo *send;
 				string neighbour;
 				list<int> sendLater;
@@ -149,7 +150,7 @@ void Gossip::timerFiredCallback(int type) {
 						copyArray(gossipMsg, send->data, send->start, 0);
 						send->seq = expectedSeq = packetsSent++;
 						gSend++;
-						//(self == 0 || self == 1) && trace() << "Sending: " << send->start;
+						(self == 0 || self == 1) && trace() << "Sending: " << send->start;
 						//(self == 0 || self == 1) && printArray(send->data, 0);
 						toNetworkLayer(createGossipDataPacket(GOSSIP_PULL, *send, expectedSeq), neighbour.c_str());
 					} else
@@ -162,7 +163,7 @@ void Gossip::timerFiredCallback(int type) {
 					copyArray(gossipMsg, send->data, send->start, 0);
 					send->seq = expectedSeq = packetsSent++;
 					gSend++;
-					//(self == 0 || self == 1) && trace() << "Sending: " << send->start;
+					(self == 0 || self == 1) && trace() << "Sending: " << send->start;
 					//(self == 0 || self == 1) && printArray(send->data, 0);
 					toNetworkLayer(createGossipDataPacket(GOSSIP_PULL, *send, expectedSeq), neighbour.c_str());
 				}
@@ -178,16 +179,17 @@ void Gossip::timerFiredCallback(int type) {
 		//If there arent enough samples even after timeout discard the samples.
 
 		//??TO DO: Does this need synchronization with the fromNetworkLayer method, both access msgsFromSenders simultaneously
-		simtime_t timeout = STR_SIMTIME("1000ms"); //TO DO: make this configurable
+		simtime_t timeout = STR_SIMTIME("3000ms"); //TO DO: make this configurable
 		int sampleThreshold = 100; //TO DO: Find out what is a good number for required accuracy and adjust accordingly.
 		list<int> removeFromMap;
 		string temp;
 
 		for(map<int, SAMPLES_AND_COUNT>::iterator ii = msgsFromSenders.begin(); ii != msgsFromSenders.end(); ii++) {
 			if( (getClock() - ii->second.lastMsgReceivedAt) >= timeout) {
-				if( ii->second.count >= sampleThreshold )
+				//if( ii->second.count >= sampleThreshold )
 					//process(ii->second.samples, ii->second.count);
 					gossipFunction(ii->second.samples);
+				trace() << "Erase " <<  ii->first << " " << ii->second.count;
 				removeFromMap.push_back(ii->first);
 			}
 		}
@@ -195,7 +197,6 @@ void Gossip::timerFiredCallback(int type) {
 		//Might need to acquire lock
 		for(list<int>::iterator ii = removeFromMap.begin(); ii != removeFromMap.end(); ii++)
 			msgsFromSenders.erase( (*ii) );
-
 		temp = "200ms"; //TO DO : Vary this parameter and check the behaviour.
 		setTimer(PROCESS_SAMPLES, STR_SIMTIME(temp.c_str()));
 		break;
