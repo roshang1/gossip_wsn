@@ -19,16 +19,21 @@ cplusplus {{
 packet ApplicationPacket;
 
 struct GossipInfo {
-       	double data[10];
-		int seq;
-		short start;
+   	double data[2];
+   	int H;
+   	double T[2];
 };
 
+struct NodeInfo {
+    int neighbourCount;
+    double x;
+    double y;
+};
 
 //
 // TODO generated message class
 //
 packet GossipPacket extends ApplicationPacket {
     GossipInfo extraData;
-    int neighbourCount;
+    NodeInfo nodeInfo;
 }

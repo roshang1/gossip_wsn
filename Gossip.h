@@ -31,25 +31,11 @@ enum GOSSIP_TIMERS {
 
 struct peerInfo {
 	int id, neighbourCount, staleness;
-	double weight;
+	double x, y;
 };
 
-struct gossipExchMsg {
-	int initiator;
-	double data;
-	simtime_t receivedAt;
-	int seq;
-};
-
-struct samples_and_count {
-	double samples[1000];
-	short count;
-	simtime_t lastMsgReceivedAt;
-};
 
 typedef struct peerInfo PEERINFO;
-typedef struct gossipExchMsg GOSSIP_EXCH_MSG;
-typedef struct samples_and_count SAMPLES_AND_COUNT;
 
 class Gossip: public VirtualApplication {
 private:
@@ -58,29 +44,19 @@ private:
 	//To do: Implement using a list, it's a better option.
 	vector<PEERINFO> peers;
 	vector<PEERINFO> newPeers;
-	queue<GOSSIP_EXCH_MSG> waitQueue;
-	map<int, SAMPLES_AND_COUNT> msgsFromSenders;
-	int noOfSamples, msgSize; // Make these parameter configurable
-	double gossipMsg[1000];
-	bool isBusy;
+	double si, wi;
 	short roundsBeforeStopping;
-	int expectedSeq;
-	short wait;
-	int rounds, lateResponse, droppedRequests;
-	int gSend, gReceive, gRespond;
+	int topX, topY;
+	int numOfNodes, maxH;
+	int gSend, gReceive, gForward;
+	cModule *node, *wchannel, *network;
 
 	bool compareDouble(double num1, double num2);
 	void assignNeighbours (int id);
-	//After execution of this method, myData will contain data as per the gossip function defined.
-	void gossipFunction(double* neighboursData);
-	void process(double *neighbourData, short count);
-	void copyArray(double* src, double* dest, short srcStart, short destStart);
-	bool compareArray(double* neighboursData, short msgStart);
-	void printArray(double* data, short msgStart);
-	void printToCompare(double* data);
 	double unifRandom();
-	double calculateXi(double* samples, short sampleCount);
-	int computeR(double delta, double epsilon);
+	int drawH();
+	double* drawT();
+	void diffuseSum(int H, double* T);
 
 protected:
 	void startup();
@@ -90,11 +66,9 @@ protected:
 	void handleNeworkControlMessage(cMessage *);
 	void fromNetworkLayer(ApplicationPacket *, const char *, double, double);
 
-	int getPeer();
+	int getPeer(double* T);
 	GossipPacket* createGossipDataPacket(double, unsigned int);
 	GossipPacket* createGossipDataPacket(double, GossipInfo& , unsigned int);
-	GossipPacket* createGossipDataPacket(double, int, unsigned int);
-/*	void enQueue(GOSSIP_EXCH_MSG);
-	void deQueue();*/
+	GossipPacket* createGossipDataPacket(double, NodeInfo& , unsigned int);
 };
 #endif
