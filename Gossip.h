@@ -56,7 +56,7 @@ private:
 	double unifRandom();
 	int drawH();
 	double* drawT();
-	void diffuseSum(int H, double* T);
+	bool diffuseSum(int H, double* T);
 
 protected:
 	void startup();
