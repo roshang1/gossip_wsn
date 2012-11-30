@@ -46,10 +46,12 @@ private:
 	vector<PEERINFO> newPeers;
 	double si, wi;
 	short roundsBeforeStopping;
+	int color;
 	int topX, topY;
 	int numOfNodes, maxH;
 	int gSend, gReceive, gForward;
 	cModule *node, *wchannel, *network;
+	int lastSeq, lastPeer;
 
 	bool compareDouble(double num1, double num2);
 	void assignNeighbours (int id);

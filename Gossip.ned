@@ -28,6 +28,7 @@ simple Gossip like node.application.iApplication {
         string gossipInterval = default("6s");
         // After every "nodeStartupDiff" time, a node starts looking up its neighbours.
         int nodeStartupDiff = default(100); // in ms, code converts int to simtime_t
+        int color = default(-1); //Default = -1, use node id as color if this parameter is not set in this case.
        	double xi = default(10);
        	int nodeSeparation = default(20);
         //Stop gossip if value remains the same after this count of updates.

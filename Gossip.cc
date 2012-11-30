@@ -43,9 +43,12 @@ void Gossip::startup() {
 	string temp;
 	PEERINFO myInfo;
 
-	int nodeStartupDiff = ((int) par("nodeStartupDiff")) * self;
+	color = (int) par("color");
+	int nodeStartupDiff = ((int) par("nodeStartupDiff")) * (color == -1 ? self : color);
 	//nodeStartupDiff += 2000;
-	si = unifRandom() * 100000;
+	//si = unifRandom() * 1000;
+	si = (self == 0 || self == 1) ? 0 : (unifRandom() * 100000);
+	//si = (self == 0) ? 1 : 0;
 	wi = 1.0;
 
 	cModule* node = getParentModule();
@@ -63,6 +66,7 @@ void Gossip::startup() {
 	gossipInterval = STR_SIMTIME(par("gossipInterval"));
 
 	packetsSent = gSend = gReceive = gForward = 0;
+	lastSeq = lastPeer = -1;
 
 	myInfo.id = self;
 	myInfo.neighbourCount = 0; //Count yourself as well
@@ -80,10 +84,8 @@ void Gossip::startup() {
 	out << nodeStartupDiff;	temp = out.str(); temp += "ms";
 	setTimer(START_GOSSIP, STR_SIMTIME(temp.c_str()));
 
-
 	temp = "5000ms";
 	setTimer(SAMPLE_VALUE, STR_SIMTIME(temp.c_str()));
-
 
 	declareOutput("Wasted Requests");
 	declareOutput("Stats");
@@ -102,7 +104,7 @@ void Gossip::timerFiredCallback(int type) {
 
 	case SAMPLE_VALUE: {
 		string temp = "5000ms";
-		trace() << si / wi;
+		//trace() << si / wi;
 		setTimer(SAMPLE_VALUE, STR_SIMTIME(temp.c_str()));
 		break;
 	}
@@ -133,8 +135,7 @@ void Gossip::timerFiredCallback(int type) {
 			stringstream out;
 			int dest = getPeer(T);
 			if (dest != -1) {
-				//trace() << "Sending ";
-				//trace() << "to " << dest ;
+				//trace() << "Sending to " << dest << " for location: " << T[0]  <<  " " << T[1] ;
 				GossipInfo *send = new GossipInfo();
 				string neighbour;
 
@@ -145,11 +146,10 @@ void Gossip::timerFiredCallback(int type) {
 				send->T[1] = T[1];
 				send->data[0] = ( ( (double) send->H )/ H ) * si;
 				send->data[1] = ( ( (double) send->H )/ H ) * wi;
-				//(self == 1 || self == 9 ) && trace() << si << " " << wi << " " << si/wi;
-				//(self == 1 || self == 9 ) && trace() << "Sending";
-				//(self == 1 || self == 9 ) && trace() << send->data[0] << " " << send->data[1];
+				trace() << "Before  " << si << " " << wi << " H " << H << " Ratio " << si/wi;
+				trace() << "Sending " << send->data[0] << " " << send->data[1] << " to "<< dest;
 				si = si / H; wi = wi / H;
-				//(self == 1 || self == 9 ) && trace() << si << " " << wi << " " << si/wi;
+				trace() << "After  " << si << " " << wi << " Ratio " << si/wi;
 				toNetworkLayer(createGossipDataPacket(GOSSIP_PUSH, *send, packetsSent++), neighbour.c_str());
 				gSend++;
 			}
@@ -166,8 +166,17 @@ void Gossip::fromNetworkLayer(ApplicationPacket * genericPacket, const char *sou
 	NodeInfo rcvdNeighbourInfo = rcvPacket->getNodeInfo();
 	NodeInfo sendInfo;
 	int peer = atoi(source), i;
+	int seq = rcvPacket->getSequenceNumber();
 	PEERINFO neighbour;
 	bool found = false;
+
+	if(seq == lastSeq && peer == lastPeer){
+		trace() << "Duplicate hai duplicate!";
+		return;
+	}
+
+	lastSeq = seq;
+	lastPeer = peer;
 
 	switch ((int) msgType) {
 
@@ -204,18 +213,18 @@ void Gossip::fromNetworkLayer(ApplicationPacket * genericPacket, const char *sou
 
 	case GOSSIP_PUSH:
 		gReceive++;
-		//(self == 1 || self == 9 ) && trace() << "Received";
-		//(self == 1 || self == 9 ) && trace() << receivedData.data[0] << " " << receivedData.data[0];
-		//(self == 1 || self == 9 ) && trace() << si << " " << wi << " " << si/wi;
+		trace() << "Received " << receivedData.data[0] << " " << receivedData.data[0] << " H " << receivedData.H << " from " << peer;
+		trace() << "Before  " << si << " " << wi << " Ratio " << si/wi;
+		trace() << "Keep " << (receivedData.data[0] / receivedData.H) << " " << (receivedData.data[1] / receivedData.H);
 		si += (receivedData.data[0] / receivedData.H);
 		wi += (receivedData.data[1] / receivedData.H);
-		//(self == 1 || self == 9 ) && trace() << si << " " << wi << " " << si/wi;
+		trace() << "After  " << si << " " << wi << " Ratio " << si/wi;
+
 		if(receivedData.H != 1) {
 			stringstream out;
 			int dest = getPeer(receivedData.T);
 			if (dest != -1) {
-				//trace() << "Forwarding ";
-				//trace() << "to " << dest ;
+				//trace() << "Forwarding to " << dest << " for location: " << receivedData.T[0]  <<  " " << receivedData.T[1] ;
 				GossipInfo *send = new GossipInfo();
 				string neighbour;
 
@@ -228,14 +237,16 @@ void Gossip::fromNetworkLayer(ApplicationPacket * genericPacket, const char *sou
 				send->data[0] = ( ( (double) send->H )/ receivedData.H ) *  receivedData.data[0];
 				send->data[1] = ( ( (double) send->H )/ receivedData.H ) *  receivedData.data[1];
 
+				trace() << "Forward " << send->data[0] << " " << send->data[1] << " to "<< dest;
 				//si = si / H; wi = wi / H;
 				toNetworkLayer(createGossipDataPacket(GOSSIP_PUSH, *send, packetsSent++), neighbour.c_str());
 				gForward++;
 			}else{
-				//(self == 1 || self == 9 ) && trace() << si << " " << wi << " " << si/wi;
+				trace() << "Couldn't send. Save everything that was sent.";
+				trace() << "Before  " << si << " " << wi << " Ratio " << si/wi;
 				si += ( ( (double) receivedData.H - 1 )/ receivedData.H ) *  receivedData.data[0];
 				wi += ( ( (double) receivedData.H - 1 )/ receivedData.H ) *  receivedData.data[1];
-				//(self == 1 || self == 9 ) && trace() << si << " " << wi << " " << si/wi;
+				trace() << "After  " << si << " " << wi << " Ratio " << si/wi;
 			}
 		} else {
 
@@ -344,11 +355,12 @@ void Gossip::handleNeworkControlMessage(cMessage * msg) {
 void Gossip::assignNeighbours (int id) {
 	PEERINFO neighbour;
 	switch (id) {
+
 	case 0:
 		neighbour.id = 1;
 		neighbour.staleness = 0;
 		neighbour.neighbourCount = 3;
-		neighbour.x = 20.0;
+		neighbour.x = 18.0;
 		neighbour.y = 0.0;
 		peers.push_back(neighbour);
 
@@ -356,7 +368,7 @@ void Gossip::assignNeighbours (int id) {
 		neighbour.staleness = 0;
 		neighbour.neighbourCount = 3;
 		neighbour.x = 0.0;
-		neighbour.y = 20.0;
+		neighbour.y = 18.0;
 		peers.push_back(neighbour);
 
 		peers.at(0).neighbourCount = 2;
@@ -373,15 +385,15 @@ void Gossip::assignNeighbours (int id) {
 		neighbour.id = 2;
 		neighbour.staleness = 0;
 		neighbour.neighbourCount = 3;
-		neighbour.x = 40.0;
+		neighbour.x = 36.0;
 		neighbour.y = 0.0;
 		peers.push_back(neighbour);
 
 		neighbour.id = 6;
 		neighbour.staleness = 0;
 		neighbour.neighbourCount = 4;
-		neighbour.x = 20.0;
-		neighbour.y = 20.0;
+		neighbour.x = 18.0;
+		neighbour.y = 18.0;
 		peers.push_back(neighbour);
 
 		peers.at(0).neighbourCount = 3;
@@ -391,22 +403,22 @@ void Gossip::assignNeighbours (int id) {
 		neighbour.id = 1;
 		neighbour.staleness = 0;
 		neighbour.neighbourCount = 3;
-		neighbour.x = 20.0;
+		neighbour.x = 18.0;
 		neighbour.y = 0.0;
 		peers.push_back(neighbour);
 
 		neighbour.id = 3;
 		neighbour.staleness = 0;
 		neighbour.neighbourCount = 3;
-		neighbour.x = 60.0;
+		neighbour.x = 54.0;
 		neighbour.y = 0.0;
 		peers.push_back(neighbour);
 
 		neighbour.id = 7;
 		neighbour.staleness = 0;
 		neighbour.neighbourCount = 4;
-		neighbour.x = 40.0;
-		neighbour.y = 20.0;
+		neighbour.x = 36.0;
+		neighbour.y = 18.0;
 		peers.push_back(neighbour);
 
 		peers.at(0).neighbourCount = 3;
@@ -416,22 +428,22 @@ void Gossip::assignNeighbours (int id) {
 		neighbour.id = 2;
 		neighbour.staleness = 0;
 		neighbour.neighbourCount = 3;
-		neighbour.x = 40.0;
+		neighbour.x = 36.0;
 		neighbour.y = 0.0;
 		peers.push_back(neighbour);
 
 		neighbour.id = 4;
 		neighbour.staleness = 0;
 		neighbour.neighbourCount = 2;
-		neighbour.x = 80.0;
+		neighbour.x = 72.0;
 		neighbour.y = 0.0;
 		peers.push_back(neighbour);
 
 		neighbour.id = 8;
 		neighbour.staleness = 0;
 		neighbour.neighbourCount = 4;
-		neighbour.x = 60.0;
-		neighbour.y = 20.0;
+		neighbour.x = 54.0;
+		neighbour.y = 18.0;
 		peers.push_back(neighbour);
 
 		peers.at(0).neighbourCount = 3;
@@ -441,15 +453,15 @@ void Gossip::assignNeighbours (int id) {
 		neighbour.id = 3;
 		neighbour.staleness = 0;
 		neighbour.neighbourCount = 3;
-		neighbour.x = 60.0;
+		neighbour.x = 54.0;
 		neighbour.y = 0.0;
 		peers.push_back(neighbour);
 
 		neighbour.id = 9;
 		neighbour.staleness = 0;
 		neighbour.neighbourCount = 3;
-		neighbour.x = 80.0;
-		neighbour.y = 20.0;
+		neighbour.x = 72.0;
+		neighbour.y = 18.0;
 		peers.push_back(neighbour);
 
 		peers.at(0).neighbourCount = 2;
@@ -466,15 +478,15 @@ void Gossip::assignNeighbours (int id) {
 		neighbour.id = 6;
 		neighbour.staleness = 0;
 		neighbour.neighbourCount = 4;
-		neighbour.x = 20.0;
-		neighbour.y = 20.0;
+		neighbour.x = 18.0;
+		neighbour.y = 18.0;
 		peers.push_back(neighbour);
 
 		neighbour.id = 10;
 		neighbour.staleness = 0;
 		neighbour.neighbourCount = 3;
 		neighbour.x = 0.0;
-		neighbour.y = 40.0;
+		neighbour.y = 36.0;
 		peers.push_back(neighbour);
 
 		peers.at(0).neighbourCount = 3;
@@ -484,7 +496,7 @@ void Gossip::assignNeighbours (int id) {
 		neighbour.id = 1;
 		neighbour.staleness = 0;
 		neighbour.neighbourCount = 3;
-		neighbour.x = 20.0;
+		neighbour.x = 18.0;
 		neighbour.y = 0.0;
 		peers.push_back(neighbour);
 
@@ -492,21 +504,21 @@ void Gossip::assignNeighbours (int id) {
 		neighbour.staleness = 0;
 		neighbour.neighbourCount = 3;
 		neighbour.x = 0.0;
-		neighbour.y = 20.0;
+		neighbour.y = 18.0;
 		peers.push_back(neighbour);
 
 		neighbour.id = 7;
 		neighbour.staleness = 0;
 		neighbour.neighbourCount = 4;
-		neighbour.x = 40.0;
-		neighbour.y = 20.0;
+		neighbour.x = 36.0;
+		neighbour.y = 18.0;
 		peers.push_back(neighbour);
 
 		neighbour.id = 11;
 		neighbour.staleness = 0;
 		neighbour.neighbourCount = 4;
-		neighbour.x = 20.0;
-		neighbour.y = 40.0;
+		neighbour.x = 18.0;
+		neighbour.y = 36.0;
 		peers.push_back(neighbour);
 
 		peers.at(0).neighbourCount = 4;
@@ -516,29 +528,29 @@ void Gossip::assignNeighbours (int id) {
 		neighbour.id = 2;
 		neighbour.staleness = 0;
 		neighbour.neighbourCount = 3;
-		neighbour.x = 40.0;
+		neighbour.x = 36.0;
 		neighbour.y = 0.0;
 		peers.push_back(neighbour);
 
 		neighbour.id = 6;
 		neighbour.staleness = 0;
 		neighbour.neighbourCount = 4;
-		neighbour.x = 20.0;
-		neighbour.y = 20.0;
+		neighbour.x = 18.0;
+		neighbour.y = 18.0;
 		peers.push_back(neighbour);
 
 		neighbour.id = 8;
 		neighbour.staleness = 0;
 		neighbour.neighbourCount = 4;
-		neighbour.x = 60.0;
-		neighbour.y = 20.0;
+		neighbour.x = 54.0;
+		neighbour.y = 18.0;
 		peers.push_back(neighbour);
 
 		neighbour.id = 12;
 		neighbour.staleness = 0;
 		neighbour.neighbourCount = 4;
-		neighbour.x = 40.0;
-		neighbour.y = 40.0;
+		neighbour.x = 36.0;
+		neighbour.y = 36.0;
 		peers.push_back(neighbour);
 
 		peers.at(0).neighbourCount = 4;
@@ -548,29 +560,29 @@ void Gossip::assignNeighbours (int id) {
 		neighbour.id = 3;
 		neighbour.staleness = 0;
 		neighbour.neighbourCount = 3;
-		neighbour.x = 60.0;
+		neighbour.x = 54.0;
 		neighbour.y = 0.0;
 		peers.push_back(neighbour);
 
 		neighbour.id = 7;
 		neighbour.staleness = 0;
 		neighbour.neighbourCount = 4;
-		neighbour.x = 40.0;
-		neighbour.y = 20.0;
+		neighbour.x = 36.0;
+		neighbour.y = 18.0;
 		peers.push_back(neighbour);
 
 		neighbour.id = 9;
 		neighbour.staleness = 0;
 		neighbour.neighbourCount = 3;
-		neighbour.x = 80.0;
-		neighbour.y = 20.0;
+		neighbour.x = 72.0;
+		neighbour.y = 18.0;
 		peers.push_back(neighbour);
 
 		neighbour.id = 13;
 		neighbour.staleness = 0;
 		neighbour.neighbourCount = 4;
-		neighbour.x = 60.0;
-		neighbour.y = 40.0;
+		neighbour.x = 54.0;
+		neighbour.y = 36.0;
 		peers.push_back(neighbour);
 
 		peers.at(0).neighbourCount = 4;
@@ -580,22 +592,22 @@ void Gossip::assignNeighbours (int id) {
 		neighbour.id = 4;
 		neighbour.staleness = 0;
 		neighbour.neighbourCount = 2;
-		neighbour.x = 80.0;
+		neighbour.x = 72.0;
 		neighbour.y = 0.0;
 		peers.push_back(neighbour);
 
 		neighbour.id = 8;
 		neighbour.staleness = 0;
 		neighbour.neighbourCount = 4;
-		neighbour.x = 60.0;
-		neighbour.y = 20.0;
+		neighbour.x = 54.0;
+		neighbour.y = 18.0;
 		peers.push_back(neighbour);
 
 		neighbour.id = 14;
 		neighbour.staleness = 0;
 		neighbour.neighbourCount = 3;
-		neighbour.x = 80.0;
-		neighbour.y = 40.0;
+		neighbour.x = 72.0;
+		neighbour.y = 36.0;
 		peers.push_back(neighbour);
 
 		peers.at(0).neighbourCount = 3;
@@ -606,21 +618,21 @@ void Gossip::assignNeighbours (int id) {
 		neighbour.staleness = 0;
 		neighbour.neighbourCount = 3;
 		neighbour.x = 0.0;
-		neighbour.y = 20.0;
+		neighbour.y = 18.0;
 		peers.push_back(neighbour);
 
 		neighbour.id = 11;
 		neighbour.staleness = 0;
 		neighbour.neighbourCount = 4;
-		neighbour.x = 20.0;
-		neighbour.y = 40.0;
+		neighbour.x = 18.0;
+		neighbour.y = 36.0;
 		peers.push_back(neighbour);
 
 		neighbour.id = 15;
 		neighbour.staleness = 0;
 		neighbour.neighbourCount = 3;
 		neighbour.x = 0.0;
-		neighbour.y = 60.0;
+		neighbour.y = 54.0;
 		peers.push_back(neighbour);
 
 		peers.at(0).neighbourCount = 3;
@@ -630,29 +642,29 @@ void Gossip::assignNeighbours (int id) {
 		neighbour.id = 6;
 		neighbour.staleness = 0;
 		neighbour.neighbourCount = 4;
-		neighbour.x = 20.0;
-		neighbour.y = 20.0;
+		neighbour.x = 18.0;
+		neighbour.y = 18.0;
 		peers.push_back(neighbour);
 
 		neighbour.id = 10;
 		neighbour.staleness = 0;
 		neighbour.neighbourCount = 3;
 		neighbour.x = 0.0;
-		neighbour.y = 40.0;
+		neighbour.y = 36.0;
 		peers.push_back(neighbour);
 
 		neighbour.id = 12;
 		neighbour.staleness = 0;
 		neighbour.neighbourCount = 4;
-		neighbour.x = 40.0;
-		neighbour.y = 40.0;
+		neighbour.x = 36.0;
+		neighbour.y = 36.0;
 		peers.push_back(neighbour);
 
 		neighbour.id = 16;
 		neighbour.staleness = 0;
 		neighbour.neighbourCount = 4;
-		neighbour.x = 20.0;
-		neighbour.y = 60.0;
+		neighbour.x = 18.0;
+		neighbour.y = 54.0;
 		peers.push_back(neighbour);
 
 		peers.at(0).neighbourCount = 4;
@@ -662,29 +674,29 @@ void Gossip::assignNeighbours (int id) {
 		neighbour.id = 7;
 		neighbour.staleness = 0;
 		neighbour.neighbourCount = 4;
-		neighbour.x = 40.0;
-		neighbour.y = 20.0;
+		neighbour.x = 36.0;
+		neighbour.y = 18.0;
 		peers.push_back(neighbour);
 
 		neighbour.id = 11;
 		neighbour.staleness = 0;
 		neighbour.neighbourCount = 4;
-		neighbour.x = 20.0;
-		neighbour.y = 40.0;
+		neighbour.x = 18.0;
+		neighbour.y = 36.0;
 		peers.push_back(neighbour);
 
 		neighbour.id = 13;
 		neighbour.staleness = 0;
 		neighbour.neighbourCount = 4;
-		neighbour.x = 60.0;
-		neighbour.y = 40.0;
+		neighbour.x = 54.0;
+		neighbour.y = 36.0;
 		peers.push_back(neighbour);
 
 		neighbour.id = 17;
 		neighbour.staleness = 0;
 		neighbour.neighbourCount = 4;
-		neighbour.x = 40.0;
-		neighbour.y = 60.0;
+		neighbour.x = 36.0;
+		neighbour.y = 54.0;
 		peers.push_back(neighbour);
 
 		peers.at(0).neighbourCount = 4;
@@ -694,29 +706,29 @@ void Gossip::assignNeighbours (int id) {
 		neighbour.id = 8;
 		neighbour.staleness = 0;
 		neighbour.neighbourCount = 4;
-		neighbour.x = 60.0;
-		neighbour.y = 20.0;
+		neighbour.x = 54.0;
+		neighbour.y = 18.0;
 		peers.push_back(neighbour);
 
 		neighbour.id = 12;
 		neighbour.staleness = 0;
 		neighbour.neighbourCount = 4;
-		neighbour.x = 40.0;
-		neighbour.y = 40.0;
+		neighbour.x = 36.0;
+		neighbour.y = 36.0;
 		peers.push_back(neighbour);
 
 		neighbour.id = 14;
 		neighbour.staleness = 0;
 		neighbour.neighbourCount = 3;
-		neighbour.x = 80.0;
-		neighbour.y = 40.0;
+		neighbour.x = 72.0;
+		neighbour.y = 36.0;
 		peers.push_back(neighbour);
 
 		neighbour.id = 18;
 		neighbour.staleness = 0;
 		neighbour.neighbourCount = 4;
-		neighbour.x = 60.0;
-		neighbour.y = 60.0;
+		neighbour.x = 54.0;
+		neighbour.y = 54.0;
 		peers.push_back(neighbour);
 
 		peers.at(0).neighbourCount = 4;
@@ -726,22 +738,22 @@ void Gossip::assignNeighbours (int id) {
 		neighbour.id = 9;
 		neighbour.staleness = 0;
 		neighbour.neighbourCount = 3;
-		neighbour.x = 80.0;
-		neighbour.y = 20.0;
+		neighbour.x = 72.0;
+		neighbour.y = 18.0;
 		peers.push_back(neighbour);
 
 		neighbour.id = 13;
 		neighbour.staleness = 0;
 		neighbour.neighbourCount = 4;
-		neighbour.x = 60.0;
-		neighbour.y = 40.0;
+		neighbour.x = 54.0;
+		neighbour.y = 36.0;
 		peers.push_back(neighbour);
 
 		neighbour.id = 19;
 		neighbour.staleness = 0;
 		neighbour.neighbourCount = 3;
-		neighbour.x = 80.0;
-		neighbour.y = 60.0;
+		neighbour.x = 72.0;
+		neighbour.y = 54.0;
 		peers.push_back(neighbour);
 
 		peers.at(0).neighbourCount = 3;
@@ -752,21 +764,21 @@ void Gossip::assignNeighbours (int id) {
 		neighbour.staleness = 0;
 		neighbour.neighbourCount = 3;
 		neighbour.x = 0.0;
-		neighbour.y = 40.0;
+		neighbour.y = 36.0;
 		peers.push_back(neighbour);
 
 		neighbour.id = 16;
 		neighbour.staleness = 0;
 		neighbour.neighbourCount = 4;
-		neighbour.x = 20.0;
-		neighbour.y = 60.0;
+		neighbour.x = 18.0;
+		neighbour.y = 54.0;
 		peers.push_back(neighbour);
 
 		neighbour.id = 20;
 		neighbour.staleness = 0;
 		neighbour.neighbourCount = 2;
 		neighbour.x = 0.0;
-		neighbour.y = 80.0;
+		neighbour.y = 72.0;
 		peers.push_back(neighbour);
 
 		peers.at(0).neighbourCount = 3;
@@ -776,29 +788,29 @@ void Gossip::assignNeighbours (int id) {
 		neighbour.id = 11;
 		neighbour.staleness = 0;
 		neighbour.neighbourCount = 4;
-		neighbour.x = 20.0;
-		neighbour.y = 40.0;
+		neighbour.x = 18.0;
+		neighbour.y = 36.0;
 		peers.push_back(neighbour);
 
 		neighbour.id = 15;
 		neighbour.staleness = 0;
 		neighbour.neighbourCount = 3;
 		neighbour.x = 0.0;
-		neighbour.y = 60.0;
+		neighbour.y = 54.0;
 		peers.push_back(neighbour);
 
 		neighbour.id = 17;
 		neighbour.staleness = 0;
 		neighbour.neighbourCount = 4;
-		neighbour.x = 40.0;
-		neighbour.y = 60.0;
+		neighbour.x = 36.0;
+		neighbour.y = 54.0;
 		peers.push_back(neighbour);
 
 		neighbour.id = 21;
 		neighbour.staleness = 0;
 		neighbour.neighbourCount = 3;
-		neighbour.x = 20.0;
-		neighbour.y = 80.0;
+		neighbour.x = 18.0;
+		neighbour.y = 72.0;
 		peers.push_back(neighbour);
 
 		peers.at(0).neighbourCount = 4;
@@ -808,29 +820,29 @@ void Gossip::assignNeighbours (int id) {
 		neighbour.id = 12;
 		neighbour.staleness = 0;
 		neighbour.neighbourCount = 4;
-		neighbour.x = 40.0;
-		neighbour.y = 40.0;
+		neighbour.x = 36.0;
+		neighbour.y = 36.0;
 		peers.push_back(neighbour);
 
 		neighbour.id = 16;
 		neighbour.staleness = 0;
 		neighbour.neighbourCount = 4;
-		neighbour.x = 20.0;
-		neighbour.y = 60.0;
+		neighbour.x = 18.0;
+		neighbour.y = 54.0;
 		peers.push_back(neighbour);
 
 		neighbour.id = 18;
 		neighbour.staleness = 0;
 		neighbour.neighbourCount = 4;
-		neighbour.x = 60.0;
-		neighbour.y = 60.0;
+		neighbour.x = 54.0;
+		neighbour.y = 54.0;
 		peers.push_back(neighbour);
 
 		neighbour.id = 22;
 		neighbour.staleness = 0;
 		neighbour.neighbourCount = 3;
-		neighbour.x = 40.0;
-		neighbour.y = 80.0;
+		neighbour.x = 36.0;
+		neighbour.y = 72.0;
 		peers.push_back(neighbour);
 
 		peers.at(0).neighbourCount = 4;
@@ -840,29 +852,29 @@ void Gossip::assignNeighbours (int id) {
 		neighbour.id = 13;
 		neighbour.staleness = 0;
 		neighbour.neighbourCount = 4;
-		neighbour.x = 60.0;
-		neighbour.y = 40.0;
+		neighbour.x = 54.0;
+		neighbour.y = 36.0;
 		peers.push_back(neighbour);
 
 		neighbour.id = 17;
 		neighbour.staleness = 0;
 		neighbour.neighbourCount = 4;
-		neighbour.x = 40.0;
-		neighbour.y = 60.0;
+		neighbour.x = 36.0;
+		neighbour.y = 54.0;
 		peers.push_back(neighbour);
 
 		neighbour.id = 19;
 		neighbour.staleness = 0;
 		neighbour.neighbourCount = 3;
-		neighbour.x = 80.0;
-		neighbour.y = 60.0;
+		neighbour.x = 72.0;
+		neighbour.y = 54.0;
 		peers.push_back(neighbour);
 
 		neighbour.id = 23;
 		neighbour.staleness = 0;
 		neighbour.neighbourCount = 3;
-		neighbour.x = 60.0;
-		neighbour.y = 80.0;
+		neighbour.x = 54.0;
+		neighbour.y = 72.0;
 		peers.push_back(neighbour);
 
 		peers.at(0).neighbourCount = 4;
@@ -872,22 +884,22 @@ void Gossip::assignNeighbours (int id) {
 		neighbour.id = 14;
 		neighbour.staleness = 0;
 		neighbour.neighbourCount = 3;
-		neighbour.x = 80.0;
-		neighbour.y = 40.0;
+		neighbour.x = 72.0;
+		neighbour.y = 36.0;
 		peers.push_back(neighbour);
 
 		neighbour.id = 18;
 		neighbour.staleness = 0;
 		neighbour.neighbourCount = 4;
-		neighbour.x = 60.0;
-		neighbour.y = 60.0;
+		neighbour.x = 54.0;
+		neighbour.y = 54.0;
 		peers.push_back(neighbour);
 
 		neighbour.id = 24;
 		neighbour.staleness = 0;
 		neighbour.neighbourCount = 2;
-		neighbour.x = 80.0;
-		neighbour.y = 80.0;
+		neighbour.x = 72.0;
+		neighbour.y = 72.0;
 		peers.push_back(neighbour);
 
 		peers.at(0).neighbourCount = 3;
@@ -898,14 +910,14 @@ void Gossip::assignNeighbours (int id) {
 		neighbour.staleness = 0;
 		neighbour.neighbourCount = 3;
 		neighbour.x = 0.0;
-		neighbour.y = 60.0;
+		neighbour.y = 54.0;
 		peers.push_back(neighbour);
 
 		neighbour.id = 21;
 		neighbour.staleness = 0;
 		neighbour.neighbourCount = 3;
-		neighbour.x = 20.0;
-		neighbour.y = 80.0;
+		neighbour.x = 18.0;
+		neighbour.y = 72.0;
 		peers.push_back(neighbour);
 
 		peers.at(0).neighbourCount = 2;
@@ -915,22 +927,22 @@ void Gossip::assignNeighbours (int id) {
 		neighbour.id = 16;
 		neighbour.staleness = 0;
 		neighbour.neighbourCount = 4;
-		neighbour.x = 20.0;
-		neighbour.y = 60.0;
+		neighbour.x = 18.0;
+		neighbour.y = 54.0;
 		peers.push_back(neighbour);
 
 		neighbour.id = 20;
 		neighbour.staleness = 0;
 		neighbour.neighbourCount = 2;
 		neighbour.x = 0.0;
-		neighbour.y = 80.0;
+		neighbour.y = 72.0;
 		peers.push_back(neighbour);
 
 		neighbour.id = 22;
 		neighbour.staleness = 0;
 		neighbour.neighbourCount = 3;
-		neighbour.x = 40.0;
-		neighbour.y = 80.0;
+		neighbour.x = 36.0;
+		neighbour.y = 72.0;
 		peers.push_back(neighbour);
 
 		peers.at(0).neighbourCount = 3;
@@ -940,22 +952,22 @@ void Gossip::assignNeighbours (int id) {
 		neighbour.id = 17;
 		neighbour.staleness = 0;
 		neighbour.neighbourCount = 4;
-		neighbour.x = 40.0;
-		neighbour.y = 60.0;
+		neighbour.x = 36.0;
+		neighbour.y = 54.0;
 		peers.push_back(neighbour);
 
 		neighbour.id = 21;
 		neighbour.staleness = 0;
 		neighbour.neighbourCount = 3;
-		neighbour.x = 20.0;
-		neighbour.y = 80.0;
+		neighbour.x = 18.0;
+		neighbour.y = 72.0;
 		peers.push_back(neighbour);
 
 		neighbour.id = 23;
 		neighbour.staleness = 0;
 		neighbour.neighbourCount = 3;
-		neighbour.x = 60.0;
-		neighbour.y = 80.0;
+		neighbour.x = 54.0;
+		neighbour.y = 72.0;
 		peers.push_back(neighbour);
 
 		peers.at(0).neighbourCount = 3;
@@ -965,22 +977,22 @@ void Gossip::assignNeighbours (int id) {
 		neighbour.id = 18;
 		neighbour.staleness = 0;
 		neighbour.neighbourCount = 4;
-		neighbour.x = 60.0;
-		neighbour.y = 60.0;
+		neighbour.x = 54.0;
+		neighbour.y = 54.0;
 		peers.push_back(neighbour);
 
 		neighbour.id = 22;
 		neighbour.staleness = 0;
 		neighbour.neighbourCount = 3;
-		neighbour.x = 40.0;
-		neighbour.y = 80.0;
+		neighbour.x = 36.0;
+		neighbour.y = 72.0;
 		peers.push_back(neighbour);
 
 		neighbour.id = 24;
 		neighbour.staleness = 0;
 		neighbour.neighbourCount = 2;
-		neighbour.x = 80.0;
-		neighbour.y = 80.0;
+		neighbour.x = 72.0;
+		neighbour.y = 72.0;
 		peers.push_back(neighbour);
 
 		peers.at(0).neighbourCount = 3;
@@ -990,18 +1002,222 @@ void Gossip::assignNeighbours (int id) {
 		neighbour.id = 19;
 		neighbour.staleness = 0;
 		neighbour.neighbourCount = 3;
-		neighbour.x = 80.0;
-		neighbour.y = 60.0;
+		neighbour.x = 72.0;
+		neighbour.y = 54.0;
 		peers.push_back(neighbour);
 
 		neighbour.id = 23;
 		neighbour.staleness = 0;
 		neighbour.neighbourCount = 3;
-		neighbour.x = 60.0;
-		neighbour.y = 80.0;
+		neighbour.x = 54.0;
+		neighbour.y = 72.0;
 		peers.push_back(neighbour);
 
 		peers.at(0).neighbourCount = 2;
 		break;
+/*
+	case 0:
+		neighbour.id = 1;
+		neighbour.staleness = 0;
+		neighbour.neighbourCount = 3;
+		neighbour.x = 18.0;
+		neighbour.y = 0.0;
+		peers.push_back(neighbour);
+
+		neighbour.id = 3;
+		neighbour.staleness = 0;
+		neighbour.neighbourCount = 3;
+		neighbour.x = 0.0;
+		neighbour.y = 18.0;
+		peers.push_back(neighbour);
+
+		peers.at(0).neighbourCount = 2;
+		break;
+
+	case 1:
+		neighbour.id = 0;
+		neighbour.staleness = 0;
+		neighbour.neighbourCount = 2;
+		neighbour.x = 0.0;
+		neighbour.y = 0.0;
+		peers.push_back(neighbour);
+
+		neighbour.id = 2;
+		neighbour.staleness = 0;
+		neighbour.neighbourCount = 2;
+		neighbour.x = 36.0;
+		neighbour.y = 0.0;
+		peers.push_back(neighbour);
+
+		neighbour.id = 4;
+		neighbour.staleness = 0;
+		neighbour.neighbourCount = 4;
+		neighbour.x = 18.0;
+		neighbour.y = 18.0;
+		peers.push_back(neighbour);
+
+		peers.at(0).neighbourCount = 3;
+		break;
+
+	case 2:
+		neighbour.id = 1;
+		neighbour.staleness = 0;
+		neighbour.neighbourCount = 3;
+		neighbour.x = 18.0;
+		neighbour.y = 0.0;
+		peers.push_back(neighbour);
+
+		neighbour.id = 5;
+		neighbour.staleness = 0;
+		neighbour.neighbourCount = 3;
+		neighbour.x = 36.0;
+		neighbour.y = 18.0;
+		peers.push_back(neighbour);
+
+		peers.at(0).neighbourCount = 2;
+		break;
+
+	case 3:
+		neighbour.id = 0;
+		neighbour.staleness = 0;
+		neighbour.neighbourCount = 2;
+		neighbour.x = 0.0;
+		neighbour.y = 0.0;
+		peers.push_back(neighbour);
+
+		neighbour.id = 4;
+		neighbour.staleness = 0;
+		neighbour.neighbourCount = 4;
+		neighbour.x = 18.0;
+		neighbour.y = 18.0;
+		peers.push_back(neighbour);
+
+		neighbour.id = 6;
+		neighbour.staleness = 0;
+		neighbour.neighbourCount = 2;
+		neighbour.x = 0.0;
+		neighbour.y = 36.0;
+		peers.push_back(neighbour);
+
+		peers.at(0).neighbourCount = 3;
+		break;
+
+	case 4:
+		neighbour.id = 1;
+		neighbour.staleness = 0;
+		neighbour.neighbourCount = 3;
+		neighbour.x = 18.0;
+		neighbour.y = 0.0;
+		peers.push_back(neighbour);
+
+		neighbour.id = 3;
+		neighbour.staleness = 0;
+		neighbour.neighbourCount = 3;
+		neighbour.x = 0.0;
+		neighbour.y = 18.0;
+		peers.push_back(neighbour);
+
+		neighbour.id = 5;
+		neighbour.staleness = 0;
+		neighbour.neighbourCount = 3;
+		neighbour.x = 36.0;
+		neighbour.y = 18.0;
+		peers.push_back(neighbour);
+
+		neighbour.id = 7;
+		neighbour.staleness = 0;
+		neighbour.neighbourCount = 3;
+		neighbour.x = 18.0;
+		neighbour.y = 36.0;
+		peers.push_back(neighbour);
+
+		peers.at(0).neighbourCount = 4;
+		break;
+
+	case 5:
+		neighbour.id = 2;
+		neighbour.staleness = 0;
+		neighbour.neighbourCount = 2;
+		neighbour.x = 36.0;
+		neighbour.y = 0.0;
+		peers.push_back(neighbour);
+
+		neighbour.id = 4;
+		neighbour.staleness = 0;
+		neighbour.neighbourCount = 4;
+		neighbour.x = 18.0;
+		neighbour.y = 18.0;
+		peers.push_back(neighbour);
+
+		neighbour.id = 8;
+		neighbour.staleness = 0;
+		neighbour.neighbourCount = 2;
+		neighbour.x = 36.0;
+		neighbour.y = 36.0;
+		peers.push_back(neighbour);
+
+		peers.at(0).neighbourCount = 3;
+		break;
+
+	case 6:
+		neighbour.id = 3;
+		neighbour.staleness = 0;
+		neighbour.neighbourCount = 3;
+		neighbour.x = 0.0;
+		neighbour.y = 18.0;
+		peers.push_back(neighbour);
+
+		neighbour.id = 7;
+		neighbour.staleness = 0;
+		neighbour.neighbourCount = 3;
+		neighbour.x = 18.0;
+		neighbour.y = 36.0;
+		peers.push_back(neighbour);
+
+		peers.at(0).neighbourCount = 2;
+		break;
+
+	case 7:
+		neighbour.id = 4;
+		neighbour.staleness = 0;
+		neighbour.neighbourCount = 4;
+		neighbour.x = 18.0;
+		neighbour.y = 18.0;
+		peers.push_back(neighbour);
+
+		neighbour.id = 6;
+		neighbour.staleness = 0;
+		neighbour.neighbourCount = 2;
+		neighbour.x = 0.0;
+		neighbour.y = 36.0;
+		peers.push_back(neighbour);
+
+		neighbour.id = 8;
+		neighbour.staleness = 0;
+		neighbour.neighbourCount = 2;
+		neighbour.x = 36.0;
+		neighbour.y = 36.0;
+		peers.push_back(neighbour);
+
+		peers.at(0).neighbourCount = 3;
+		break;
+
+	case 8:
+		neighbour.id = 5;
+		neighbour.staleness = 0;
+		neighbour.neighbourCount = 3;
+		neighbour.x = 36.0;
+		neighbour.y = 18.0;
+		peers.push_back(neighbour);
+
+		neighbour.id = 7;
+		neighbour.staleness = 0;
+		neighbour.neighbourCount = 3;
+		neighbour.x = 18.0;
+		neighbour.y = 36.0;
+		peers.push_back(neighbour);
+
+		peers.at(0).neighbourCount = 2;
+		break;*/
 	}
 }
